@@ -1,0 +1,70 @@
+{
+  "name": "vite-plugin-v8-bytecode",
+  "version": "0.0.0-pre.1",
+  "description": "A Vite plugin for integrating V8 bytecode into your Vite project",
+  "author": "Ben Williams",
+  "license": "MIT",
+  "homepage": "https://github.com/biw/vite-plugin-v8-bytecode",
+  "packageManager": "yarn@4.10.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biw/vite-plugin-v8-bytecode.git"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "workspaces": [
+    "examples/*"
+  ],
+  "keywords": [
+    "vite",
+    "plugin",
+    "native",
+    "modules",
+    "node-gyp",
+    "native-module",
+    "native-addon",
+    "native-module-loader",
+    "electron",
+    "electron-vite"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "vite": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "dependencies": {
+    "@babel/core": "^7.28.5",
+    "magic-string": "^0.30.21",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@babel/types": "^7.28.5",
+    "@eslint/js": "^9.39.1",
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "22.18.0",
+    "electron": "^39.1.0",
+    "eslint": "9.39.1",
+    "tsup": "8.5.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.3",
+    "vite": "7.2.1",
+    "vitest": "^4.0.7"
+  }
+}
