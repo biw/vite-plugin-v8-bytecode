@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-v8-bytecode",
-  "version": "0.0.1",
+  "version": "0.0.1-pre.1",
   "description": "A Vite plugin for compiling JavaScript to V8 bytecode for Node.js and Electron applications",
   "author": "Ben Williams",
   "license": "MIT",
