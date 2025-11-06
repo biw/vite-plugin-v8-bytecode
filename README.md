@@ -15,12 +15,6 @@ A Vite plugin that compiles JavaScript to V8 bytecode for Node.js and Electron a
 - 📦 **Works with Node.js & Electron** - Compatible with both runtimes
 - 🛠️ **Production Only** - Automatically disabled in development for faster builds
 
-## Requirements
-
-- Node.js 22 or newer
-- Vite 3.0+
-- CommonJS output format (CJS)
-
 ## Installation
 
 ```bash
@@ -213,11 +207,3 @@ This plugin is inspired by:
 ## License
 
 MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues, questions, or feature requests, please [open an issue](https://github.com/biw/vite-plugin-v8-bytecode/issues) on GitHub.

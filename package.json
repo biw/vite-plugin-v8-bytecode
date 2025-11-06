@@ -1,7 +1,7 @@
 {
   "name": "vite-plugin-v8-bytecode",
-  "version": "0.0.0-pre.1",
-  "description": "A Vite plugin for integrating V8 bytecode into your Vite project",
+  "version": "0.0.1",
+  "description": "A Vite plugin for compiling JavaScript to V8 bytecode for Node.js and Electron applications",
   "author": "Ben Williams",
   "license": "MIT",
   "homepage": "https://github.com/biw/vite-plugin-v8-bytecode",
@@ -51,8 +51,7 @@
   },
   "dependencies": {
     "@babel/core": "^7.28.5",
-    "magic-string": "^0.30.21",
-    "picocolors": "^1.1.1"
+    "magic-string": "^0.30.21"
   },
   "devDependencies": {
     "@babel/types": "^7.28.5",

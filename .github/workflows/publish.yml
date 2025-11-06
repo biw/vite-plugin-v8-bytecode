@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "package.json"
 
 # Required permissions for npm provenance and GitHub releases
 permissions:
@@ -37,7 +35,7 @@ jobs:
           echo "Current version in package.json: $CURRENT_VERSION"
 
           # Get published version from npm (if it exists)
-          PUBLISHED_VERSION=$(npm view vite-plugin-native-modules version 2>/dev/null || echo "none")
+          PUBLISHED_VERSION=$(npm view vite-plugin-v8-bytecode version 2>/dev/null || echo "none")
           echo "Published version on npm: $PUBLISHED_VERSION"
 
           # Compare versions
@@ -94,10 +92,15 @@ jobs:
       - name: Build
         run: yarn build
 
-      - name: Publish to npm with provenance
+      # IMPORTANT: npm >= 11.5.1 and npm publish, not yarn npm publish
+      - name: Ensure recent npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Verify npm version
+        run: npm --version
+
+      - name: Publish to npm via trusted publisher
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
