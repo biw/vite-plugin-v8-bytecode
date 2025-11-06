@@ -27,6 +27,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
+          registry-url: "https://registry.npmjs.org"
 
       - name: Check if version should be published
         id: check
@@ -67,7 +68,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
-
+          registry-url: "https://registry.npmjs.org"
       - name: Enable Corepack
         run: corepack enable
 
