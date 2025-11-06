@@ -7,7 +7,7 @@ on:
 
 # Required permissions for npm provenance and GitHub releases
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 jobs:
