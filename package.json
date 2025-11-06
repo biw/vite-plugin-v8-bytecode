@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-v8-bytecode",
-  "version": "0.0.0-pre.2",
+  "version": "0.0.1",
   "description": "A Vite plugin for integrating V8 bytecode into your Vite project",
   "author": "Ben Williams",
   "license": "MIT",
