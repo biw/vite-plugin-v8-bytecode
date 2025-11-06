@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "package.json"
 
 # Required permissions for npm provenance and GitHub releases
 permissions:
@@ -103,7 +101,7 @@ jobs:
         run: npm --version
 
       - name: Publish to npm via trusted publisher
-        run: npm publish --access public
+        run: npm publish --provenance --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
