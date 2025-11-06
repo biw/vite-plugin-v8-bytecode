@@ -23,8 +23,6 @@ jobs:
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Check if version should be published
         id: check
@@ -63,8 +61,7 @@ jobs:
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
+
       - name: Enable Corepack
         run: corepack enable
 
