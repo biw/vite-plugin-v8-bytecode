@@ -3728,7 +3728,6 @@ __metadata:
     electron: "npm:^39.1.0"
     eslint: "npm:9.39.1"
     magic-string: "npm:^0.30.21"
-    picocolors: "npm:^1.1.1"
     tsup: "npm:8.5.0"
     typescript: "npm:5.9.3"
     typescript-eslint: "npm:8.46.3"

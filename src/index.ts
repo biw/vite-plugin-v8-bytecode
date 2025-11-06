@@ -1,5 +1,4 @@
 import path from "node:path";
-import colors from "picocolors";
 import type { Plugin, Logger } from "vite";
 import MagicString from "magic-string";
 import type { SourceMapInput, OutputChunk } from "rollup";
@@ -92,9 +91,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         (p) => p.name === "vite:electron-renderer-preset-config"
       );
       if (useInRenderer) {
-        config.logger.warn(
-          colors.yellow("bytecodePlugin does not support renderer.")
-        );
+        config.logger.warn("bytecodePlugin does not support renderer.");
         return;
       }
 
@@ -112,10 +109,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
 
         if (output.format === "es") {
           config.logger.warn(
-            colors.yellow(
-              "bytecodePlugin does not support ES module output format. " +
-                'Please set "build.rollupOptions.output.format" to "cjs".'
-            )
+            "bytecodePlugin does not support ES module output format. " +
+              'Please set "build.rollupOptions.output.format" to "cjs".'
           );
         }
 
@@ -293,11 +288,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         const bytecodeChunkCount = Object.keys(output).filter((chunk) =>
           bytecodeChunkExtensionRE.test(chunk)
         ).length;
-        logger.info(
-          `${colors.green(
-            `✓`
-          )} ${bytecodeChunkCount} chunks compiled into bytecode.`
-        );
+        logger.info(`✓ ${bytecodeChunkCount} chunks compiled into bytecode.`);
       }
     },
   };
