@@ -99,6 +99,9 @@ jobs:
       - name: Ensure recent npm for trusted publishing
         run: npm install -g npm@latest
 
+      - name: Verify npm version
+        run: npm --version
+
       - name: Publish to npm via trusted publisher
         run: npm publish --access public
 
