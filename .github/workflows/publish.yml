@@ -95,8 +95,12 @@ jobs:
       - name: Build
         run: yarn build
 
-      - name: Publish to npm with provenance
-        run: yarn npm publish --provenance --access public
+      # IMPORTANT: npm >= 11.5.1 and npm publish, not yarn npm publish
+      - name: Ensure recent npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Publish to npm via trusted publisher
+        run: npm publish --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
