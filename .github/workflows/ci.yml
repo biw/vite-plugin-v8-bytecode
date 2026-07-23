@@ -52,9 +52,6 @@ jobs:
       - name: Type check
         run: yarn tsc --noEmit
 
-      - name: Test
-        run: yarn test
-
       - name: Build
         run: yarn build
 
@@ -65,3 +62,6 @@ jobs:
             exit 1
           fi
           echo "Build output verified successfully"
+
+      - name: Test
+        run: yarn test
