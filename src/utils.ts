@@ -20,31 +20,11 @@ export function resolveBuildOutputs(
 ): OutputOptions | OutputOptions[] | undefined {
   if (libOptions && !Array.isArray(outputs)) {
     const libFormats = libOptions.formats || [];
-    return libFormats.map((format) => ({ ...outputs, format }));
+    if (libFormats.length > 0) {
+      return libFormats.map((format) => ({ ...outputs, format }));
+    }
   }
   return outputs;
-}
-
-/**
- * Detects if code is using ES modules or CommonJS
- */
-export function detectModuleFormat(code: string): "esm" | "cjs" {
-  // Simple heuristic: check for import/export statements
-  const esmPattern = /\b(import|export)\s+/;
-  return esmPattern.test(code) ? "esm" : "cjs";
-}
-
-/**
- * Wraps ES module code in a CommonJS wrapper
- * This allows ES modules to work with the bytecode loader
- */
-export function wrapESModuleAsCommonJS(code: string): string {
-  // For ES modules, we need to wrap them in a CommonJS-compatible format
-  // This is a simplified approach - for production use, you might want a more robust solution
-  return `(function(exports, require, module, __filename, __dirname) {
-'use strict';
-${code}
-})`;
 }
 
 /**

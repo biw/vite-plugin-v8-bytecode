@@ -84,6 +84,10 @@ function protectStringsPlugin(
         }
       },
       TemplateLiteral(path, state) {
+        if (path.parentPath.isTaggedTemplateExpression({ quasi: path.node })) {
+          return;
+        }
+
         // Must be a pure static template literal
         // expressions must be empty (no ${variables})
         // quasis must have only one element (meaning the entire string is a single static part)
@@ -102,8 +106,8 @@ function protectStringsPlugin(
 }
 
 /**
- * Babel plugin that converts template literals to string concatenation
- * This is REQUIRED for V8 bytecode compatibility - template literals don't work in cached bytecode
+ * Babel plugin that converts untagged template literals to string concatenation.
+ * Tagged templates must be preserved because their template object is observable.
  */
 function templateLiteralToConcatPlugin(api: typeof babel): PluginObj {
   const { types: t } = api;
@@ -112,44 +116,43 @@ function templateLiteralToConcatPlugin(api: typeof babel): PluginObj {
     name: "template-literal-to-concat",
     visitor: {
       TemplateLiteral(path) {
+        // A tag receives the template object and substitutions separately.
+        // Replacing its quasi would both invalidate the AST and change semantics.
+        if (path.parentPath.isTaggedTemplateExpression({ quasi: path.node })) {
+          return;
+        }
+
         const { quasis, expressions } = path.node;
 
-        // Build string concatenation
-        let result: babel.types.Expression | null = null;
+        // Chained String#concat calls preserve template-literal coercion and
+        // evaluation order. In particular, each expression is converted with
+        // a string hint before the following expression is evaluated.
+        let result: babel.types.Expression = t.stringLiteral(
+          quasis[0]?.value.cooked ?? ""
+        );
 
-        for (let i = 0; i < quasis.length; i++) {
-          const quasi = quasis[i];
+        for (let i = 0; i < expressions.length; i++) {
           const expr = expressions[i];
-
-          // Add the template string part
-          if (quasi.value.cooked) {
-            const stringLiteral = t.stringLiteral(quasi.value.cooked);
-            result = result
-              ? t.binaryExpression("+", result, stringLiteral)
-              : stringLiteral;
+          if (!t.isExpression(expr)) {
+            continue;
           }
 
-          // Add the expression part (if exists)
-          // Template literal expressions are always Expression type, not TSType
-          if (expr && t.isExpression(expr)) {
-            result = result ? t.binaryExpression("+", result, expr) : expr;
-          }
+          const nextQuasi = quasis[i + 1]?.value.cooked ?? "";
+          result = t.callExpression(
+            t.memberExpression(result, t.identifier("concat")),
+            [expr, t.stringLiteral(nextQuasi)]
+          );
         }
 
-        // Replace with concatenated result or empty string
-        if (result) {
-          path.replaceWith(result);
-        } else {
-          path.replaceWith(t.stringLiteral(""));
-        }
+        path.replaceWith(result);
       },
     },
   };
 }
 
 /**
- * Transforms code using Babel with template literal conversion and optional string protection
- * Template literal conversion is ALWAYS applied for bytecode compatibility
+ * Transforms code using Babel with untagged template literal conversion and
+ * optional string protection.
  */
 export function transformCode(
   code: string,
@@ -157,7 +160,7 @@ export function transformCode(
   sourceMaps: boolean = false
 ): { code: string; map?: SourceMapInput } | null {
   const plugins: babel.PluginItem[] = [
-    // ALWAYS convert template literals for bytecode compatibility
+    // Convert ordinary template literals while preserving tagged templates.
     templateLiteralToConcatPlugin,
   ];
 

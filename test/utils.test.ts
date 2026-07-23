@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
+import path from "node:path";
+import { describe, it, expect, vi } from "vitest";
 import {
   toRelativePath,
   normalizePath,
   resolveBuildOutputs,
-  detectModuleFormat,
 } from "../src/utils";
 
 describe("Utility Functions", () => {
@@ -53,6 +53,24 @@ describe("Utility Functions", () => {
       const result = toRelativePath(from, to);
 
       expect(result.startsWith(".")).toBe(true);
+    });
+
+    it("should emit portable require specifiers on Windows", () => {
+      const dirname = vi
+        .spyOn(path, "dirname")
+        .mockImplementation(path.win32.dirname);
+      const relative = vi
+        .spyOn(path, "relative")
+        .mockImplementation(path.win32.relative);
+
+      try {
+        expect(
+          toRelativePath("bytecode-loader.cjs", "nested/entry.cjs")
+        ).toBe("../bytecode-loader.cjs");
+      } finally {
+        dirname.mockRestore();
+        relative.mockRestore();
+      }
     });
   });
 
@@ -134,96 +152,22 @@ describe("Utility Functions", () => {
       expect(result[0].dir).toBe("dist");
     });
 
-    it("should handle empty formats array", () => {
+    it("should preserve the configured output when library formats are empty", () => {
       const outputs = { name: "test" };
       const libOptions = { entry: "index.js", formats: [] as any[] };
 
       const result = resolveBuildOutputs(outputs, libOptions);
 
-      expect(Array.isArray(result)).toBe(true);
-      expect((result as any[]).length).toBe(0);
-    });
-  });
-
-  describe("detectModuleFormat", () => {
-    it("should detect ES modules with import statement", () => {
-      const code = 'import { foo } from "bar";';
-
-      const result = detectModuleFormat(code);
-
-      expect(result).toBe("esm");
+      expect(result).toBe(outputs);
     });
 
-    it("should detect ES modules with export statement", () => {
-      const code = "export const foo = 42;";
+    it("should preserve the configured output when library formats are omitted", () => {
+      const outputs = { format: "cjs" as const };
+      const libOptions = { entry: "index.js" };
 
-      const result = detectModuleFormat(code);
+      const result = resolveBuildOutputs(outputs, libOptions);
 
-      expect(result).toBe("esm");
-    });
-
-    it("should detect ES modules with export default", () => {
-      const code = "export default function() {}";
-
-      const result = detectModuleFormat(code);
-
-      expect(result).toBe("esm");
-    });
-
-    it("should detect CommonJS without import/export", () => {
-      const code = 'const foo = require("bar");';
-
-      const result = detectModuleFormat(code);
-
-      expect(result).toBe("cjs");
-    });
-
-    it("should detect CommonJS with module.exports", () => {
-      const code = "module.exports = { foo: 42 };";
-
-      const result = detectModuleFormat(code);
-
-      expect(result).toBe("cjs");
-    });
-
-    it("should handle code with both import and require (ESM)", () => {
-      const code = `
-        import { foo } from "bar";
-        const baz = require("qux");
-      `;
-
-      const result = detectModuleFormat(code);
-
-      // import takes precedence
-      expect(result).toBe("esm");
-    });
-
-    it("should handle empty code as CommonJS", () => {
-      const code = "";
-
-      const result = detectModuleFormat(code);
-
-      expect(result).toBe("cjs");
-    });
-
-    it("should detect import keyword even in comments (simple regex)", () => {
-      const code = "// import something\nconst x = 1;";
-
-      const result = detectModuleFormat(code);
-
-      // Simple regex will match import even in comments
-      // This is acceptable for our use case since vite output won't have this
-      expect(result).toBe("esm");
-    });
-
-    it("should detect export keyword even in strings (simple regex)", () => {
-      const code = 'const x = "export something";';
-
-      const result = detectModuleFormat(code);
-
-      // Simple regex will match export even in strings
-      // This is acceptable for our use case since vite output won't have this
-      expect(result).toBe("esm");
+      expect(result).toBe(outputs);
     });
   });
 });

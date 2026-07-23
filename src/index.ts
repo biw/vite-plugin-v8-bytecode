@@ -72,7 +72,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   const bytecodeModuleLoader = "bytecode-loader.cjs";
 
   let logger: Logger;
-  let supported = false;
+  let enabled = false;
 
   return {
     name: "vite:bytecode",
@@ -80,10 +80,6 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
     enforce: "post",
 
     configResolved(config): void {
-      if (supported) {
-        return;
-      }
-
       logger = config.logger;
 
       // Check if used in renderer (not supported)
@@ -95,6 +91,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         return;
       }
 
+      enabled = true;
+
       const build = config.build;
       const resolvedOutputs = resolveBuildOutputs(
         build.rollupOptions.output,
@@ -105,34 +103,35 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         const outputs = Array.isArray(resolvedOutputs)
           ? resolvedOutputs
           : [resolvedOutputs];
-        const output = outputs[0];
 
-        if (output.format === "es") {
+        if (outputs.some((output) => output.format !== "cjs")) {
           config.logger.warn(
-            "bytecodePlugin does not support ES module output format. " +
-              'Please set "build.rollupOptions.output.format" to "cjs".'
+            "bytecodePlugin only supports CommonJS output. " +
+              "Non-CommonJS outputs will be left unchanged."
           );
         }
-
-        supported = output.format === "cjs" && !useInRenderer;
       }
     },
 
     renderChunk(
       code,
       chunk,
-      { sourcemap }
+      outputOptions
     ): { code: string; map?: SourceMapInput } | null {
-      // ALWAYS transform bytecode chunks to convert template literals
-      // Template literals don't work in V8 cached bytecode
-      if (supported && isBytecodeChunk(chunk.name)) {
-        return transformCode(code, protectedStrings, !!sourcemap);
+      // Transform ordinary template literals in CommonJS bytecode chunks.
+      // Tagged templates are preserved because rewriting them changes semantics.
+      if (
+        enabled &&
+        outputOptions.format === "cjs" &&
+        isBytecodeChunk(chunk.name)
+      ) {
+        return transformCode(code, protectedStrings, !!outputOptions.sourcemap);
       }
       return null;
     },
 
-    async generateBundle(_, output): Promise<void> {
-      if (!supported) {
+    async generateBundle(outputOptions, output): Promise<void> {
+      if (!enabled || outputOptions.format !== "cjs") {
         return;
       }
 
@@ -219,7 +218,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
                 const bytecodeLoaderBlock = getBytecodeLoaderBlock(
                   chunk.fileName
                 );
-                const bytecodeModuleBlock = `require("./${
+                const bytecodeModuleBlock = `module.exports = require("./${
                   path.basename(name) + "c"
                 }");`;
                 const code = `${useStrict}\n${bytecodeLoaderBlock}\n${bytecodeModuleBlock}\n`;
@@ -283,8 +282,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       }
     },
 
-    writeBundle(_, output): void {
-      if (supported) {
+    writeBundle(outputOptions, output): void {
+      if (enabled && outputOptions.format === "cjs") {
         const bytecodeChunkCount = Object.keys(output).filter((chunk) =>
           bytecodeChunkExtensionRE.test(chunk)
         ).length;
