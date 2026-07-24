@@ -37,6 +37,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Configure Electron sandbox
+        run: |
+          node -e 'require("electron")'
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install --yes xvfb
 
