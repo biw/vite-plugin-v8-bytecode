@@ -8,11 +8,9 @@ tsup.config.ts
 .editorconfig
 eslint.config.mjs
 
-# Yarn
-.yarn
-.yarnrc.yml
-yarn.lock
-.pnp.*
+# pnpm
+pnpm-lock.yaml
+pnpm-workspace.yaml
 
 # Git
 .git
