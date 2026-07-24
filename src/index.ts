@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Plugin, Logger } from "vite";
-import type { SourceMapInput, OutputChunk, OutputOptions } from "rollup";
+import type {
+  OutputBundle,
+  OutputChunk,
+  OutputOptions,
+  SourceMapInput,
+} from "rollup";
 import {
   compileToBytecodeBatchForRuntime,
   type BytecodeRuntimeOptions,
@@ -95,8 +100,6 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   let logger: Logger;
   let enabled = false;
   let configRoot = process.cwd();
-  let packageType: string | undefined;
-  let hasFileSystemEntry = false;
   const selectedChunkFileNames = new Set<string>();
 
   return {
@@ -109,11 +112,6 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       enabled = false;
       selectedChunkFileNames.clear();
       configRoot = config.root;
-      packageType = findNearestPackageType(config.root);
-      hasFileSystemEntry = hasExistingBuildInput(
-        config.build.rollupOptions.input,
-        config.root
-      );
 
       // Check if used in renderer (not supported)
       const useInRenderer = config.plugins.some(
@@ -190,12 +188,19 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         ])
       );
       const incompatibleChunk = allChunks.find(
-        (chunk) =>
-          /\.js$/i.test(chunk.fileName) &&
-          hasFileSystemEntry &&
-          packageType === "module" &&
-          (chunk.isEntry ||
-            !bytecodeFileNames.has(normalizePath(chunk.fileName)))
+        (chunk) => {
+          const normalizedFileName = normalizePath(chunk.fileName);
+          return (
+            /\.js$/i.test(normalizedFileName) &&
+            getOutputPackageType(
+              normalizedFileName,
+              outputOptions,
+              output,
+              configRoot
+            ) === "module" &&
+            (chunk.isEntry || !bytecodeFileNames.has(normalizedFileName))
+          );
+        }
       );
       if (incompatibleChunk) {
         this.error(
@@ -216,12 +221,45 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       };
 
       if (!removeBundleJS) {
-        const retainedFileNames = new Map(
-          allChunks.map((chunk) => [
-            normalizePath(chunk.fileName),
-            `_${normalizePath(chunk.fileName)}`,
-          ])
+        const reservedFileNames = new Set(
+          Object.keys(output).map((fileName) => normalizePath(fileName))
         );
+        const retainedFileNames = new Map<string, string>();
+        for (const chunk of allChunks) {
+          const normalizedFileName = normalizePath(chunk.fileName);
+          const candidateFileName = `_${normalizedFileName}`;
+          const packageType = getOutputPackageType(
+            candidateFileName,
+            outputOptions,
+            output,
+            configRoot
+          );
+          const preferredFileName =
+            packageType === "module" && /\.js$/i.test(candidateFileName)
+              ? `${candidateFileName}.cjs`
+              : candidateFileName;
+          retainedFileNames.set(
+            normalizedFileName,
+            reserveUniqueFileName(preferredFileName, reservedFileNames)
+          );
+        }
+        const retainedMapFileNames = new Map<string, string>();
+        for (const chunk of allChunks) {
+          const sourceMapFileName = getSourceMapFileName(chunk);
+          if (
+            sourceMapFileName &&
+            output[sourceMapFileName]?.type === "asset" &&
+            !retainedMapFileNames.has(sourceMapFileName)
+          ) {
+            retainedMapFileNames.set(
+              sourceMapFileName,
+              reserveUniqueFileName(
+                `_${sourceMapFileName}`,
+                reservedFileNames
+              )
+            );
+          }
+        }
 
         for (const chunk of allChunks) {
           const retainedFileName = retainedFileNames.get(
@@ -236,7 +274,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           const sourceMapFileName = getSourceMapFileName(chunk);
 
           if (sourceMapFileName && output[sourceMapFileName]?.type === "asset") {
-            const retainedMapFileName = `_${sourceMapFileName}`;
+            const retainedMapFileName =
+              retainedMapFileNames.get(sourceMapFileName)!;
             retainedCode = replaceSourceMapReference(
               retainedCode,
               path.posix.basename(retainedMapFileName)
@@ -484,29 +523,95 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-function hasExistingBuildInput(
-  input: string | string[] | Record<string, string> | undefined,
-  root: string
-): boolean {
-  const inputs =
-    typeof input === "string"
-      ? [input]
-      : Array.isArray(input)
-        ? input
-        : input
-          ? Object.values(input)
-          : [];
+interface PackageTypeBoundary {
+  found: boolean;
+  type?: string;
+}
 
-  return inputs.some((fileName) => {
-    const inputPath = path.resolve(root, fileName);
-    const relativePath = path.relative(root, inputPath);
-    const isInsideRoot =
-      relativePath === "" ||
-      (!relativePath.startsWith(`..${path.sep}`) &&
-        relativePath !== ".." &&
-        !path.isAbsolute(relativePath));
-    return isInsideRoot && fs.existsSync(inputPath);
-  });
+function readPackageTypeBoundary(directory: string): PackageTypeBoundary {
+  const packagePath = path.join(directory, "package.json");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packagePath, "utf8")) as {
+      type?: unknown;
+    };
+    return {
+      found: true,
+      type: typeof parsed.type === "string" ? parsed.type : undefined,
+    };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { found: true };
+    }
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return { found: false };
+    }
+    throw error;
+  }
+}
+
+function reserveUniqueFileName(
+  preferredFileName: string,
+  reservedFileNames: Set<string>
+): string {
+  const extension = path.posix.extname(preferredFileName);
+  const baseName = extension
+    ? preferredFileName.slice(0, -extension.length)
+    : preferredFileName;
+  let fileName = preferredFileName;
+  let suffix = 1;
+
+  while (reservedFileNames.has(fileName)) {
+    fileName = `${baseName}.${suffix}${extension}`;
+    suffix += 1;
+  }
+  reservedFileNames.add(fileName);
+  return fileName;
+}
+
+function getOutputPackageType(
+  fileName: string,
+  outputOptions: OutputOptions,
+  output: OutputBundle,
+  configRoot: string
+): string | undefined {
+  const outputDirectory = outputOptions.dir
+    ? path.resolve(configRoot, outputOptions.dir)
+    : outputOptions.file
+      ? path.dirname(path.resolve(configRoot, outputOptions.file))
+      : configRoot;
+  let directory = path.posix.dirname(normalizePath(fileName));
+
+  while (true) {
+    const packageFileName =
+      directory === "." ? "package.json" : `${directory}/package.json`;
+    const emittedPackage = output[packageFileName];
+    if (emittedPackage?.type === "asset") {
+      const source =
+        typeof emittedPackage.source === "string"
+          ? emittedPackage.source
+          : Buffer.from(emittedPackage.source).toString("utf8");
+      try {
+        const parsed = JSON.parse(source) as { type?: unknown };
+        return typeof parsed.type === "string" ? parsed.type : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+
+    const onDiskPackage = readPackageTypeBoundary(
+      path.join(outputDirectory, directory)
+    );
+    if (onDiskPackage.found) {
+      return onDiskPackage.type;
+    }
+
+    if (directory === ".") {
+      break;
+    }
+    directory = path.posix.dirname(directory);
+  }
+
+  return findNearestPackageType(path.dirname(outputDirectory));
 }
 
 // Export types

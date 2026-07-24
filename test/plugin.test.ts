@@ -219,6 +219,152 @@ describe("bytecodePlugin output formats", () => {
     ).rejects.toThrow(/index\.js.*type.*module.*\.cjs/is);
   });
 
+  it("rejects a CommonJS .js library entry that would run as ESM", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+
+    await expect(
+      build({
+        configFile: false,
+        logLevel: "silent",
+        plugins: [bytecodePlugin()],
+        root: fixtureDir,
+        build: {
+          lib: {
+            entry: path.join(fixtureDir, "entry.js"),
+            fileName: () => "index.js",
+            formats: ["cjs"],
+            name: "RegressionFixture",
+          },
+          write: false,
+        },
+      })
+    ).rejects.toThrow(/index\.js.*type.*module.*\.cjs/is);
+  });
+
+  it("uses the package type nearest the output directory", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const outputDirectory = path.join(fixtureDir, "commonjs-output");
+    fs.mkdirSync(outputDirectory);
+    fs.writeFileSync(
+      path.join(outputDirectory, "package.json"),
+      JSON.stringify({ private: true, type: "commonjs" })
+    );
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin()],
+      root: fixtureDir,
+      build: {
+        outDir: outputDirectory,
+        write: false,
+        rollupOptions: {
+          input: path.join(fixtureDir, "entry.js"),
+          output: {
+            entryFileNames: "index.js",
+            format: "cjs",
+          },
+        },
+      },
+    })) as RollupOutput;
+
+    expect(
+      result.output.map((file) => file.fileName)
+    ).toEqual(expect.arrayContaining(["index.js", "index.jsc"]));
+  });
+
+  it("stops at an emitted package boundary without a type field", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const emittedPackage: Plugin = {
+      name: "emitted-commonjs-package-boundary",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "package.json",
+          source: JSON.stringify({ private: true }),
+        });
+      },
+    };
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin(), emittedPackage],
+      root: fixtureDir,
+      build: {
+        write: false,
+        rollupOptions: {
+          input: path.join(fixtureDir, "entry.js"),
+          output: {
+            entryFileNames: "index.js",
+            format: "cjs",
+          },
+        },
+      },
+    })) as RollupOutput;
+
+    expect(
+      result.output.map((file) => file.fileName)
+    ).toEqual(
+      expect.arrayContaining(["package.json", "index.js", "index.jsc"])
+    );
+  });
+
+  it("prefers a nearer on-disk package over an emitted ancestor package", async () => {
+    const outputDirectory = path.join(fixtureDir, "mixed-package-output");
+    const nestedOutputDirectory = path.join(outputDirectory, "sub");
+    fs.mkdirSync(nestedOutputDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(nestedOutputDirectory, "package.json"),
+      JSON.stringify({ private: true, type: "commonjs" })
+    );
+    const emittedPackage: Plugin = {
+      name: "emitted-module-package-boundary",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "package.json",
+          source: JSON.stringify({ private: true, type: "module" }),
+        });
+      },
+    };
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin(), emittedPackage],
+      root: fixtureDir,
+      build: {
+        outDir: outputDirectory,
+        write: false,
+        rollupOptions: {
+          input: path.join(fixtureDir, "entry.js"),
+          output: {
+            entryFileNames: "sub/index.js",
+            format: "cjs",
+          },
+        },
+      },
+    })) as RollupOutput;
+
+    expect(result.output.map((file) => file.fileName)).toEqual(
+      expect.arrayContaining([
+        "package.json",
+        "sub/index.js",
+        "sub/index.jsc",
+      ])
+    );
+  });
+
   it("executes a CommonJS .cjs entry inside a type-module package", async () => {
     fs.writeFileSync(
       path.join(fixtureDir, "package.json"),
@@ -373,6 +519,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         virtualModules,
         bytecodePlugin({ chunkAlias: "feature.v1" }),
@@ -435,6 +582,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         virtualModules,
         bytecodePlugin({ chunkAlias: "secret" }),
@@ -510,6 +658,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         virtualModules,
         bytecodePlugin({ chunkAlias: "encoded" }),
@@ -586,6 +735,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         virtualModules,
         bytecodePlugin({ chunkAlias: "secret" }),
@@ -682,6 +832,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         bytecodePlugin({
           chunkAlias: "entry",
@@ -792,6 +943,225 @@ describe("bytecodePlugin output formats", () => {
         encoding: "utf8",
       })
     ).toContain("retained bundle works");
+  });
+
+  it("keeps selected .js chunks executable as retained CommonJS in a type-module package", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const entryPath = path.join(fixtureDir, "retained-module-entry.js");
+    const dependencyPath = path.join(
+      fixtureDir,
+      "retained-module-dependency.js"
+    );
+    fs.writeFileSync(
+      entryPath,
+      [
+        'import { value } from "./retained-module-dependency.js";',
+        "console.log(value);",
+      ].join("\n")
+    );
+    fs.writeFileSync(
+      dependencyPath,
+      'export const value = "retained module bundle works";\n'
+    );
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin({ removeBundleJS: false })],
+      root: fixtureDir,
+      build: {
+        write: false,
+        rollupOptions: {
+          input: { entry: entryPath },
+          output: {
+            format: "cjs",
+            entryFileNames: "entry.cjs",
+            chunkFileNames: "[name].js",
+            manualChunks(id) {
+              if (id.endsWith("retained-module-dependency.js")) {
+                return "dependency";
+              }
+            },
+          },
+        },
+      },
+    })) as RollupOutput;
+    const outputDir = writeOutput(result);
+    fs.writeFileSync(
+      path.join(outputDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+
+    expect(result.output.map((file) => file.fileName)).toContain(
+      "_dependency.js.cjs"
+    );
+    expect(
+      execFileSync(process.execPath, ["_entry.cjs"], {
+        cwd: outputDir,
+        encoding: "utf8",
+      })
+    ).toContain("retained module bundle works");
+  });
+
+  it("keeps same-stem retained extension variants distinct", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const entryPath = path.join(fixtureDir, "retained-collision-entry.js");
+    const jsChunkPath = path.join(fixtureDir, "retained-collision-js.js");
+    const cjsChunkPath = path.join(fixtureDir, "retained-collision-cjs.js");
+    const compoundChunkPath = path.join(
+      fixtureDir,
+      "retained-collision-compound.js"
+    );
+    fs.writeFileSync(
+      entryPath,
+      [
+        'import { jsValue } from "./retained-collision-js.js";',
+        'import { cjsValue } from "./retained-collision-cjs.js";',
+        'import { compoundValue } from "./retained-collision-compound.js";',
+        "console.log(jsValue, cjsValue, compoundValue);",
+      ].join("\n")
+    );
+    fs.writeFileSync(jsChunkPath, 'export const jsValue = "js";\n');
+    fs.writeFileSync(cjsChunkPath, 'export const cjsValue = "cjs";\n');
+    fs.writeFileSync(
+      compoundChunkPath,
+      'export const compoundValue = "compound";\n'
+    );
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin({ removeBundleJS: false })],
+      root: fixtureDir,
+      build: {
+        write: false,
+        rollupOptions: {
+          input: { entry: entryPath },
+          output: {
+            format: "cjs",
+            entryFileNames: "entry.cjs",
+            chunkFileNames(chunk) {
+              if (chunk.name === "javascript") {
+                return "foo.js";
+              }
+              return chunk.name === "commonjs" ? "foo.cjs" : "foo.js.cjs";
+            },
+            manualChunks(id) {
+              if (id.endsWith("retained-collision-js.js")) {
+                return "javascript";
+              }
+              if (id.endsWith("retained-collision-cjs.js")) {
+                return "commonjs";
+              }
+              if (id.endsWith("retained-collision-compound.js")) {
+                return "compound";
+              }
+            },
+          },
+        },
+      },
+    })) as RollupOutput;
+    const outputDir = writeOutput(result);
+    fs.writeFileSync(
+      path.join(outputDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const files = result.output.map((file) => file.fileName);
+
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "_foo.js.cjs",
+        "_foo.cjs",
+        "_foo.js.1.cjs",
+      ])
+    );
+    expect(
+      execFileSync(process.execPath, ["_entry.cjs"], {
+        cwd: outputDir,
+        encoding: "utf8",
+      })
+    ).toContain("js cjs compound");
+  });
+
+  it("disambiguates retained chunks from existing output names", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const entryPath = path.join(fixtureDir, "reserved-name-entry.js");
+    const selectedPath = path.join(fixtureDir, "reserved-name-selected.js");
+    const existingPath = path.join(fixtureDir, "reserved-name-existing.js");
+    fs.writeFileSync(
+      entryPath,
+      [
+        'import { selectedValue } from "./reserved-name-selected.js";',
+        'import { existingValue } from "./reserved-name-existing.js";',
+        "console.log(selectedValue, existingValue);",
+      ].join("\n")
+    );
+    fs.writeFileSync(selectedPath, 'export const selectedValue = "selected";\n');
+    fs.writeFileSync(existingPath, 'export const existingValue = "existing";\n');
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        bytecodePlugin({
+          chunkAlias: ["selected"],
+          removeBundleJS: false,
+        }),
+      ],
+      root: fixtureDir,
+      build: {
+        write: false,
+        rollupOptions: {
+          input: { entry: entryPath },
+          output: {
+            format: "cjs",
+            entryFileNames: "entry.cjs",
+            chunkFileNames(chunk) {
+              return chunk.name === "selected"
+                ? "foo.js"
+                : "_foo.js.cjs";
+            },
+            manualChunks(id) {
+              if (id.endsWith("reserved-name-selected.js")) {
+                return "selected";
+              }
+              if (id.endsWith("reserved-name-existing.js")) {
+                return "existing";
+              }
+            },
+          },
+        },
+      },
+    })) as RollupOutput;
+    const outputDir = writeOutput(result);
+    fs.writeFileSync(
+      path.join(outputDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const files = result.output.map((file) => file.fileName);
+
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "_foo.js.cjs",
+        "_foo.js.1.cjs",
+        "__foo.js.cjs",
+      ])
+    );
+    expect(
+      execFileSync(process.execPath, ["_entry.cjs"], {
+        cwd: outputDir,
+        encoding: "utf8",
+      })
+    ).toContain("selected existing");
   });
 
   it("does not emit stale plaintext source maps for bytecode-only chunks", async () => {
@@ -945,6 +1315,7 @@ describe("bytecodePlugin output formats", () => {
     const result = (await build({
       configFile: false,
       logLevel: "silent",
+      root: fixtureDir,
       plugins: [
         virtualModules,
         bytecodePlugin({

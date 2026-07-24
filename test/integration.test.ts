@@ -1509,6 +1509,32 @@ require("./dynamic-import.jsc").then(
     expect(runNode(entryFile)).toContain("native dynamic import preserved");
   });
 
+  it("loads ordinary bytecode without the VM default-loader constant", () => {
+    writeBytecodeFixture(
+      "legacy-vm.jsc",
+      `
+"use strict";
+module.exports = { answer: 42 };
+`
+    );
+    installLoader();
+    const entryFile = writeTestFile(
+      "legacy-vm.cjs",
+      `
+"use strict";
+require("node:vm").constants = undefined;
+require("./bytecode-loader.cjs");
+const result = require("./legacy-vm.jsc");
+if (result.answer !== 42) {
+  throw new Error("legacy VM bytecode returned incorrect exports");
+}
+console.log("legacy VM bytecode preserved");
+`
+    );
+
+    expect(runNode(entryFile)).toContain("legacy VM bytecode preserved");
+  });
+
   it("rejects truncated bytecode before trusting its source-length header", () => {
     const craftedBytecode = Buffer.alloc(16);
     craftedBytecode.writeUInt32LE(1_000_002, 8);

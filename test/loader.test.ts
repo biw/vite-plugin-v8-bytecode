@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import path from "node:path";
 import { getBytecodeLoaderCode } from "../src/loader";
 
 describe("Bytecode Loader", () => {
@@ -96,6 +97,70 @@ describe("Bytecode Loader", () => {
 
       expect(loaderCode).toContain("new vm.Script(dummyCode");
       expect(loaderCode).toContain("cachedData: bytecodeBuffer");
+    });
+
+    it("loads bytecode when vm.constants is unavailable", () => {
+      const loaderCode = getBytecodeLoaderCode();
+      const extensions: Record<
+        string,
+        (module: { exports: unknown; require: () => unknown }, file: string) => void
+      > = {};
+      let bytecodeScriptOptions: Record<string, unknown> | undefined;
+      class FakeScript {
+        cachedData?: Buffer;
+        cachedDataRejected = false;
+
+        constructor(
+          _code: string,
+          options: Record<string, unknown> = {}
+        ) {
+          if (options.produceCachedData) {
+            this.cachedData = Buffer.alloc(20);
+          } else {
+            bytecodeScriptOptions = options;
+          }
+        }
+
+        runInThisContext(): () => void {
+          return () => undefined;
+        }
+      }
+      const defaultRequire = Object.assign(() => undefined, {
+        resolve: Object.assign(() => "", {
+          paths: () => [],
+        }),
+      });
+      const fakeModule = {
+        _cache: {},
+        _extensions: extensions,
+        _resolveFilename: () => "",
+        createRequire: () => defaultRequire,
+      };
+      const load = new Function("require", loaderCode);
+      load((id: string) => {
+        if (id === "fs") {
+          return { readFileSync: () => Buffer.alloc(20) };
+        }
+        if (id === "module") {
+          return fakeModule;
+        }
+        if (id === "path") {
+          return path;
+        }
+        if (id === "v8") {
+          return { setFlagsFromString: () => undefined };
+        }
+        if (id === "vm") {
+          return { Script: FakeScript };
+        }
+        throw new Error(`Unexpected module: ${id}`);
+      });
+
+      const module = { exports: {}, require: () => undefined };
+      expect(() => extensions[".jsc"](module, "fixture.jsc")).not.toThrow();
+      expect(bytecodeScriptOptions).not.toHaveProperty(
+        "importModuleDynamically"
+      );
     });
 
     it("should check for cachedDataRejected", () => {
