@@ -6,7 +6,7 @@ import type { OutputOptions } from "rollup";
  * Converts an absolute path to a relative path for require() statements
  */
 export function toRelativePath(from: string, to: string): string {
-  const relativePath = path.relative(path.dirname(to), from);
+  const relativePath = normalizePath(path.relative(path.dirname(to), from));
   // Ensure the path starts with ./ or ../
   return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
 }

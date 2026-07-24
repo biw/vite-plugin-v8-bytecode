@@ -1,10 +1,9 @@
 import path from "node:path";
 import type { Plugin, Logger } from "vite";
-import MagicString from "magic-string";
-import type { SourceMapInput, OutputChunk } from "rollup";
+import type { SourceMapInput, OutputChunk, OutputOptions } from "rollup";
 import { compileToBytecode } from "./compiler";
 import { getBytecodeLoaderCode } from "./loader";
-import { transformCode } from "./transforms";
+import { rewriteRequireSpecifiers, transformCode } from "./transforms";
 import { toRelativePath, resolveBuildOutputs, normalizePath } from "./utils";
 
 const bytecodeChunkExtensionRE = /\.(jsc|cjsc)$/;
@@ -62,9 +61,18 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   const _chunkAlias = Array.isArray(chunkAlias) ? chunkAlias : [chunkAlias];
 
   const transformAllChunks = _chunkAlias.length === 0;
-  const isBytecodeChunk = (chunkName: string): boolean => {
+  const isBytecodeChunk = (
+    chunkName: string,
+    outputOptions?: OutputOptions
+  ): boolean => {
     return (
-      transformAllChunks || _chunkAlias.some((alias) => alias === chunkName)
+      transformAllChunks ||
+      _chunkAlias.some(
+        (alias) =>
+          alias === chunkName ||
+          (typeof outputOptions?.sanitizeFileName === "function" &&
+            outputOptions.sanitizeFileName(alias) === chunkName)
+      )
     );
   };
 
@@ -73,6 +81,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
 
   let logger: Logger;
   let enabled = false;
+  const selectedChunkFileNames = new Set<string>();
 
   return {
     name: "vite:bytecode",
@@ -123,8 +132,9 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       if (
         enabled &&
         outputOptions.format === "cjs" &&
-        isBytecodeChunk(chunk.name)
+        isBytecodeChunk(chunk.name, outputOptions)
       ) {
+        selectedChunkFileNames.add(normalizePath(chunk.fileName));
         return transformCode(code, protectedStrings, !!outputOptions.sourcemap);
       }
       return null;
@@ -135,25 +145,26 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         return;
       }
 
-      const _chunks = Object.values(output);
-      const chunks = _chunks.filter(
-        (chunk) => chunk.type === "chunk" && isBytecodeChunk(chunk.name)
-      ) as OutputChunk[];
+      const initialOutput = Object.values(output);
+      const allChunks = initialOutput.filter(
+        (file): file is OutputChunk => file.type === "chunk"
+      );
+      const chunks = allChunks.filter(
+        (chunk) =>
+          selectedChunkFileNames.has(normalizePath(chunk.fileName)) ||
+          isBytecodeChunk(chunk.name, outputOptions)
+      );
 
       if (chunks.length === 0) {
         return;
       }
 
-      const bytecodeChunks = chunks.map((chunk) => chunk.fileName);
-      const nonEntryChunks = chunks
-        .filter((chunk) => !chunk.isEntry)
-        .map((chunk) => path.basename(chunk.fileName));
-
-      // Create regex to match require() calls for non-entry chunks
-      const pattern = nonEntryChunks.map((chunk) => `(${chunk})`).join("|");
-      const bytecodeRE = pattern
-        ? new RegExp(`require\\(\\S*(?=(${pattern})\\S*\\))`, "g")
-        : null;
+      const bytecodeFileNames = new Map(
+        chunks.map((chunk) => [
+          normalizePath(chunk.fileName),
+          getBytecodeFileName(normalizePath(chunk.fileName)),
+        ])
+      );
 
       const getBytecodeLoaderBlock = (chunkFileName: string): string => {
         return `require("${toRelativePath(
@@ -162,120 +173,116 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         )}");`;
       };
 
-      let bytecodeChunkCount = 0;
+      if (!removeBundleJS) {
+        const retainedFileNames = new Map(
+          allChunks.map((chunk) => [
+            normalizePath(chunk.fileName),
+            `_${normalizePath(chunk.fileName)}`,
+          ])
+        );
 
-      const bundles = Object.keys(output);
+        for (const chunk of allChunks) {
+          const retainedFileName = retainedFileNames.get(
+            normalizePath(chunk.fileName)
+          )!;
+          let retainedCode = rewriteChunkRequires(
+            chunk.code,
+            chunk.fileName,
+            retainedFileName,
+            retainedFileNames
+          ).code;
+          const sourceMapFileName = getSourceMapFileName(chunk);
 
-      await Promise.all(
-        bundles.map(async (name) => {
-          const chunk = output[name];
-          if (chunk.type === "chunk") {
-            let _code = chunk.code;
-
-            // Update require() calls to point to .jsc files
-            if (bytecodeRE) {
-              let match: RegExpExecArray | null;
-              let s: MagicString | undefined;
-              while ((match = bytecodeRE.exec(_code))) {
-                s ||= new MagicString(_code);
-                const [prefix, chunkName] = match;
-                const len = prefix.length + chunkName.length;
-                s.overwrite(
-                  match.index,
-                  match.index + len,
-                  prefix + chunkName + "c",
-                  {
-                    contentOnly: true,
-                  }
-                );
-              }
-              if (s) {
-                _code = s.toString();
-              }
-            }
-
-            if (bytecodeChunks.includes(name)) {
-              // Compile this chunk to bytecode
-              const bytecodeBuffer = await compileToBytecode(_code);
-
-              this.emitFile({
-                type: "asset",
-                fileName: name + "c",
-                source: bytecodeBuffer,
-              });
-
-              if (!removeBundleJS) {
-                // Keep original JS file with underscore prefix
-                this.emitFile({
-                  type: "asset",
-                  fileName: "_" + chunk.fileName,
-                  source: chunk.code,
-                });
-              }
-
-              if (chunk.isEntry) {
-                // For entry chunks, replace with loader code
-                const bytecodeLoaderBlock = getBytecodeLoaderBlock(
-                  chunk.fileName
-                );
-                const bytecodeModuleBlock = `module.exports = require("./${
-                  path.basename(name) + "c"
-                }");`;
-                const code = `${useStrict}\n${bytecodeLoaderBlock}\n${bytecodeModuleBlock}\n`;
-                chunk.code = code;
-              } else {
-                // For non-entry chunks, remove the original chunk
-                delete output[chunk.fileName];
-              }
-
-              bytecodeChunkCount += 1;
-            } else {
-              // This chunk is not being compiled to bytecode, but may import bytecode chunks
-              if (chunk.isEntry) {
-                let hasBytecodeModule = false;
-                const idsToHandle = new Set([
-                  ...chunk.imports,
-                  ...chunk.dynamicImports,
-                ]);
-
-                for (const moduleId of idsToHandle) {
-                  if (bytecodeChunks.includes(moduleId)) {
-                    hasBytecodeModule = true;
-                    break;
-                  }
-                  const moduleInfo = this.getModuleInfo(moduleId);
-                  if (moduleInfo && !moduleInfo.isExternal) {
-                    const { importers, dynamicImporters } = moduleInfo;
-                    for (const importerId of importers)
-                      idsToHandle.add(importerId);
-                    for (const importerId of dynamicImporters)
-                      idsToHandle.add(importerId);
-                  }
-                }
-
-                _code = hasBytecodeModule
-                  ? _code.replace(
-                      /("use strict";)|('use strict';)/,
-                      `${useStrict}\n${getBytecodeLoaderBlock(chunk.fileName)}`
-                    )
-                  : _code;
-              }
-              chunk.code = _code;
-            }
+          if (sourceMapFileName && output[sourceMapFileName]?.type === "asset") {
+            const retainedMapFileName = `_${sourceMapFileName}`;
+            retainedCode = replaceSourceMapReference(
+              retainedCode,
+              path.posix.basename(retainedMapFileName)
+            );
+            const sourceMap = output[sourceMapFileName];
+            this.emitFile({
+              type: "asset",
+              fileName: retainedMapFileName,
+              source: updateSourceMapFile(
+                sourceMap.source,
+                path.posix.basename(retainedFileName)
+              ),
+            });
           }
-        })
-      );
 
-      // Emit bytecode loader if we compiled any chunks
-      if (
-        bytecodeChunkCount &&
-        !_chunks.some(
-          (ass) => ass.type === "asset" && ass.fileName === bytecodeModuleLoader
-        )
-      ) {
+          this.emitFile({
+            type: "asset",
+            fileName: retainedFileName,
+            source: retainedCode,
+          });
+        }
+      }
+
+      for (const chunk of allChunks) {
+        const normalizedFileName = normalizePath(chunk.fileName);
+        const selected = bytecodeFileNames.has(normalizedFileName);
+        const rewritten = rewriteChunkRequires(
+          chunk.code,
+          chunk.fileName,
+          chunk.fileName,
+          bytecodeFileNames
+        );
+
+        if (!selected) {
+          chunk.code = rewritten.rewritten
+            ? injectLoader(
+                rewritten.code,
+                getBytecodeLoaderBlock(chunk.fileName)
+              )
+            : rewritten.code;
+          continue;
+        }
+
+        const bytecodeFileName = bytecodeFileNames.get(normalizedFileName)!;
+        const bytecodeBuffer = await compileToBytecode(
+          stripShebang(rewritten.code)
+        );
+
         this.emitFile({
           type: "asset",
-          source: getBytecodeLoaderCode(),
+          fileName: bytecodeFileName,
+          source: bytecodeBuffer,
+        });
+
+        const sourceMapFileName = getSourceMapFileName(chunk);
+        if (sourceMapFileName) {
+          delete output[sourceMapFileName];
+        }
+
+        if (chunk.isEntry) {
+          const shebang = getShebang(chunk.code);
+          const bytecodeLoaderBlock = getBytecodeLoaderBlock(chunk.fileName);
+          const bytecodeModuleBlock = `module.exports = require("${toRelativePath(
+            bytecodeFileName,
+            chunk.fileName
+          )}");`;
+          chunk.code = `${shebang}${useStrict}\n${bytecodeLoaderBlock}\n${bytecodeModuleBlock}\n`;
+          chunk.map = null;
+        } else {
+          delete output[chunk.fileName];
+        }
+      }
+
+      const loaderCode = getBytecodeLoaderCode();
+      const existingLoader = output[bytecodeModuleLoader];
+      if (existingLoader) {
+        if (
+          existingLoader.type !== "asset" ||
+          String(existingLoader.source) !== loaderCode
+        ) {
+          this.error(
+            `Cannot emit ${bytecodeModuleLoader}: another output already uses that filename.`
+          );
+        }
+      } else {
+        this.emitFile({
+          type: "asset",
+          source: loaderCode,
           name: "Bytecode Loader File",
           fileName: bytecodeModuleLoader,
         });
@@ -291,6 +298,84 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       }
     },
   };
+}
+
+function getBytecodeFileName(fileName: string): string {
+  return /\.(?:c?js)$/i.test(fileName) ? `${fileName}c` : `${fileName}.jsc`;
+}
+
+function rewriteChunkRequires(
+  code: string,
+  originalCallerFileName: string,
+  outputCallerFileName: string,
+  outputFileNames: ReadonlyMap<string, string>
+): { code: string; rewritten: boolean } {
+  return rewriteRequireSpecifiers(code, (specifier) => {
+    if (!specifier.startsWith(".")) {
+      return undefined;
+    }
+
+    const resolvedFileName = normalizePath(
+      path.posix.normalize(
+        path.posix.join(
+          path.posix.dirname(normalizePath(originalCallerFileName)),
+          specifier
+        )
+      )
+    );
+    const outputFileName = outputFileNames.get(resolvedFileName);
+    return outputFileName
+      ? toRelativePath(outputFileName, normalizePath(outputCallerFileName))
+      : undefined;
+  });
+}
+
+function getShebang(code: string): string {
+  return code.match(/^#![^\n]*(?:\n|$)/)?.[0] ?? "";
+}
+
+function stripShebang(code: string): string {
+  return code.slice(getShebang(code).length);
+}
+
+function injectLoader(code: string, loaderBlock: string): string {
+  const shebang = getShebang(code);
+  const body = code.slice(shebang.length);
+  const directive = body.match(/^(\s*(?:"use strict"|'use strict');)/)?.[0];
+  const insertionPoint = shebang.length + (directive?.length ?? 0);
+  return `${code.slice(0, insertionPoint)}\n${loaderBlock}${code.slice(
+    insertionPoint
+  )}`;
+}
+
+function getSourceMapFileName(chunk: OutputChunk): string | undefined {
+  return chunk.sourcemapFileName
+    ? normalizePath(chunk.sourcemapFileName)
+    : undefined;
+}
+
+function replaceSourceMapReference(code: string, fileName: string): string {
+  return code.replace(
+    /([#@]\s*sourceMappingURL=)([^\s]+)/g,
+    (_match, prefix: string) => `${prefix}${fileName}`
+  );
+}
+
+function updateSourceMapFile(
+  source: string | Uint8Array,
+  fileName: string
+): string | Uint8Array {
+  if (typeof source !== "string") {
+    return source;
+  }
+
+  try {
+    const sourceMap = JSON.parse(source) as { file?: string };
+    sourceMap.file = fileName;
+    return JSON.stringify(sourceMap);
+  } catch {
+    return source;
+  }
 }
 
 // Export types
