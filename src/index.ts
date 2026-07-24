@@ -1,14 +1,18 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { Plugin, Logger } from "vite";
 import type { SourceMapInput, OutputChunk, OutputOptions } from "rollup";
-import { compileToBytecode } from "./compiler";
+import {
+  compileToBytecodeBatchForRuntime,
+  type BytecodeRuntimeOptions,
+} from "./compiler";
 import { getBytecodeLoaderCode } from "./loader";
 import { rewriteRequireSpecifiers, transformCode } from "./transforms";
 import { toRelativePath, resolveBuildOutputs, normalizePath } from "./utils";
 
 const bytecodeChunkExtensionRE = /\.(jsc|cjsc)$/;
 
-export interface BytecodeOptions {
+interface CommonBytecodeOptions {
   /**
    * Specify which chunks to compile to bytecode.
    * If not specified or empty array, all chunks will be compiled.
@@ -28,6 +32,8 @@ export interface BytecodeOptions {
    */
   protectedStrings?: string[];
 }
+
+export type BytecodeOptions = CommonBytecodeOptions & BytecodeRuntimeOptions;
 
 /**
  * Vite plugin to compile JavaScript to V8 bytecode for Node.js and Electron
@@ -58,6 +64,13 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
     removeBundleJS = true,
     protectedStrings = [],
   } = options;
+  const runtimeOptions: BytecodeRuntimeOptions =
+    options.runtime === "electron"
+      ? {
+          electronPath: options.electronPath,
+          runtime: "electron",
+        }
+      : { runtime: options.runtime };
   const _chunkAlias = Array.isArray(chunkAlias) ? chunkAlias : [chunkAlias];
 
   const transformAllChunks = _chunkAlias.length === 0;
@@ -81,6 +94,9 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
 
   let logger: Logger;
   let enabled = false;
+  let configRoot = process.cwd();
+  let packageType: string | undefined;
+  let hasFileSystemEntry = false;
   const selectedChunkFileNames = new Set<string>();
 
   return {
@@ -90,6 +106,14 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
 
     configResolved(config): void {
       logger = config.logger;
+      enabled = false;
+      selectedChunkFileNames.clear();
+      configRoot = config.root;
+      packageType = findNearestPackageType(config.root);
+      hasFileSystemEntry = hasExistingBuildInput(
+        config.build.rollupOptions.input,
+        config.root
+      );
 
       // Check if used in renderer (not supported)
       const useInRenderer = config.plugins.some(
@@ -165,6 +189,24 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           getBytecodeFileName(normalizePath(chunk.fileName)),
         ])
       );
+      const incompatibleChunk = allChunks.find(
+        (chunk) =>
+          /\.js$/i.test(chunk.fileName) &&
+          hasFileSystemEntry &&
+          packageType === "module" &&
+          (chunk.isEntry ||
+            !bytecodeFileNames.has(normalizePath(chunk.fileName)))
+      );
+      if (incompatibleChunk) {
+        this.error(
+          `Cannot emit CommonJS ${
+            incompatibleChunk.isEntry ? "entry" : "chunk"
+          } "${incompatibleChunk.fileName}" because ` +
+            'the nearest package.json has "type": "module". Configure ' +
+            "Rollup entryFileNames and chunkFileNames to use the " +
+            '".cjs" extension.'
+        );
+      }
 
       const getBytecodeLoaderBlock = (chunkFileName: string): string => {
         return `require("${toRelativePath(
@@ -218,15 +260,42 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         }
       }
 
+      const rewrittenChunks = new Map<
+        string,
+        ReturnType<typeof rewriteChunkRequires>
+      >();
       for (const chunk of allChunks) {
         const normalizedFileName = normalizePath(chunk.fileName);
-        const selected = bytecodeFileNames.has(normalizedFileName);
         const rewritten = rewriteChunkRequires(
           chunk.code,
           chunk.fileName,
           chunk.fileName,
           bytecodeFileNames
         );
+        rewrittenChunks.set(normalizedFileName, rewritten);
+      }
+
+      const selectedBytecode = await compileToBytecodeBatchForRuntime(
+        chunks.map((chunk) => {
+          const rewritten = rewrittenChunks.get(
+            normalizePath(chunk.fileName)
+          )!;
+          return stripShebang(rewritten.code);
+        }),
+        runtimeOptions,
+        configRoot
+      );
+      const bytecodeByFileName = new Map(
+        chunks.map((chunk, index) => [
+          normalizePath(chunk.fileName),
+          selectedBytecode[index],
+        ])
+      );
+
+      for (const chunk of allChunks) {
+        const normalizedFileName = normalizePath(chunk.fileName);
+        const selected = bytecodeFileNames.has(normalizedFileName);
+        const rewritten = rewrittenChunks.get(normalizedFileName)!;
 
         if (!selected) {
           chunk.code = rewritten.rewritten
@@ -239,9 +308,12 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         }
 
         const bytecodeFileName = bytecodeFileNames.get(normalizedFileName)!;
-        const bytecodeBuffer = await compileToBytecode(
-          stripShebang(rewritten.code)
-        );
+        const bytecodeBuffer = bytecodeByFileName.get(normalizedFileName);
+        if (!bytecodeBuffer) {
+          this.error(
+            `Bytecode compiler produced no output for "${chunk.fileName}".`
+          );
+        }
 
         this.emitFile({
           type: "asset",
@@ -376,6 +448,65 @@ function updateSourceMapFile(
   } catch {
     return source;
   }
+}
+
+function findNearestPackageType(startDirectory: string): string | undefined {
+  let directory = path.resolve(startDirectory);
+
+  while (true) {
+    const packagePath = path.join(directory, "package.json");
+    try {
+      const parsed = JSON.parse(fs.readFileSync(packagePath, "utf8")) as {
+        type?: unknown;
+      };
+      return typeof parsed.type === "string" ? parsed.type : undefined;
+    } catch (error) {
+      if (
+        !(error instanceof SyntaxError) &&
+        (!isNodeError(error) || error.code !== "ENOENT")
+      ) {
+        throw error;
+      }
+      if (error instanceof SyntaxError) {
+        return undefined;
+      }
+    }
+
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+function hasExistingBuildInput(
+  input: string | string[] | Record<string, string> | undefined,
+  root: string
+): boolean {
+  const inputs =
+    typeof input === "string"
+      ? [input]
+      : Array.isArray(input)
+        ? input
+        : input
+          ? Object.values(input)
+          : [];
+
+  return inputs.some((fileName) => {
+    const inputPath = path.resolve(root, fileName);
+    const relativePath = path.relative(root, inputPath);
+    const isInsideRoot =
+      relativePath === "" ||
+      (!relativePath.startsWith(`..${path.sep}`) &&
+        relativePath !== ".." &&
+        !path.isAbsolute(relativePath));
+    return isInsideRoot && fs.existsSync(inputPath);
+  });
 }
 
 // Export types

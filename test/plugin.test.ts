@@ -193,6 +193,134 @@ describe("bytecodePlugin output formats", () => {
     expect(esEntry?.type === "chunk" ? esEntry.code : "").toContain("export");
   });
 
+  it("rejects a CommonJS .js entry that would run as ESM", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+
+    await expect(
+      build({
+        configFile: false,
+        logLevel: "silent",
+        plugins: [bytecodePlugin()],
+        root: fixtureDir,
+        build: {
+          write: false,
+          rollupOptions: {
+            input: path.join(fixtureDir, "entry.js"),
+            output: {
+              entryFileNames: "index.js",
+              format: "cjs",
+            },
+          },
+        },
+      })
+    ).rejects.toThrow(/index\.js.*type.*module.*\.cjs/is);
+  });
+
+  it("executes a CommonJS .cjs entry inside a type-module package", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const [result] = await buildLibrary(["cjs"]);
+    const outputDirectory = writeOutput(result);
+    fs.writeFileSync(
+      path.join(outputDirectory, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+
+    const exports = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["-e", 'process.stdout.write(JSON.stringify(require("./entry.cjs")))'],
+        { cwd: outputDirectory, encoding: "utf8" }
+      )
+    );
+    expect(exports.answer).toBe("42");
+  });
+
+  it("rejects an uncompiled CommonJS .js chunk inside a type-module package", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" })
+    );
+    const dependencyPath = path.join(fixtureDir, "dependency.js");
+    fs.writeFileSync(
+      path.join(fixtureDir, "entry.js"),
+      [
+        'import { answer } from "./dependency.js";',
+        "console.log(answer);",
+        "export { answer };",
+      ].join("\n")
+    );
+    fs.writeFileSync(dependencyPath, "export const answer = 42;");
+
+    await expect(
+      build({
+        configFile: false,
+        logLevel: "silent",
+        plugins: [bytecodePlugin({ chunkAlias: "entry" })],
+        root: fixtureDir,
+        build: {
+          write: false,
+          rollupOptions: {
+            input: path.join(fixtureDir, "entry.js"),
+            output: {
+              entryFileNames: "entry.cjs",
+              chunkFileNames: "[name].js",
+              format: "cjs",
+              manualChunks(id) {
+                return id.endsWith("/dependency.js")
+                  ? "dependency"
+                  : undefined;
+              },
+            },
+          },
+        },
+      })
+    ).rejects.toThrow(/dependency\.js.*type.*module.*chunkFileNames.*\.cjs/is);
+  });
+
+  it("executes a CommonJS .js entry inside a type-commonjs package", async () => {
+    fs.writeFileSync(
+      path.join(fixtureDir, "package.json"),
+      JSON.stringify({ private: true, type: "commonjs" })
+    );
+    fs.writeFileSync(
+      path.join(fixtureDir, "entry.js"),
+      "module.exports = { answer: 42 };"
+    );
+
+    const result = (await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [bytecodePlugin()],
+      root: fixtureDir,
+      build: {
+        write: false,
+        rollupOptions: {
+          input: path.join(fixtureDir, "entry.js"),
+          output: {
+            entryFileNames: "index.js",
+            format: "cjs",
+          },
+        },
+      },
+    })) as RollupOutput;
+    const outputDirectory = writeOutput(result);
+    const exports = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["-e", 'process.stdout.write(JSON.stringify(require("./index.js")))'],
+        { cwd: outputDirectory, encoding: "utf8" }
+      )
+    );
+
+    expect(exports.answer).toBe(42);
+  });
+
   it("injects the bytecode loader when Rollup strict mode is disabled", async () => {
     const result = await buildSplitChunk({ strict: false });
     const entry = result.output.find(

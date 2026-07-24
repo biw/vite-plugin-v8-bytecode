@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
       - name: Lint
         run: pnpm lint
 
@@ -55,4 +58,4 @@ jobs:
           echo "Build output verified successfully"
 
       - name: Test
-        run: pnpm test
+        run: xvfb-run --auto-servernum pnpm test

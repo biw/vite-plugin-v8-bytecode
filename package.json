@@ -41,10 +41,17 @@
     "dev": "tsup --watch",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "electron": ">=28.0.0",
     "vite": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@babel/core": "^7.28.5",
