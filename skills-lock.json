@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "conductor-setup": {
+      "source": "biw/skills",
+      "sourceType": "github",
+      "skillPath": "skills/conductor-setup/SKILL.md",
+      "computedHash": "442a67a9db20f97421ea0afe8e2627915e730feb2fb0ca57ca55425af039a812"
+    },
+    "detailed-pr-description": {
+      "source": "biw/skills",
+      "sourceType": "github",
+      "skillPath": "skills/detailed-pr-description/SKILL.md",
+      "computedHash": "0ceda07220c6737b22f6feeb4627c22fea45de7d48e42490b0caeac2b37c420c"
+    },
+    "review-fix-address-bots": {
+      "source": "biw/skills",
+      "sourceType": "github",
+      "skillPath": "skills/review-fix-address-bots/SKILL.md",
+      "computedHash": "22dbae357200c2f65acf2fb87846a47735c7b3029ff780a46bca30768040685f"
+    }
+  }
+}
