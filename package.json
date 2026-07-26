@@ -5,7 +5,7 @@
   "author": "Ben Williams",
   "license": "MIT",
   "homepage": "https://github.com/biw/vite-plugin-v8-bytecode",
-  "packageManager": "yarn@4.10.3",
+  "packageManager": "pnpm@11.17.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/biw/vite-plugin-v8-bytecode.git"
@@ -24,9 +24,6 @@
   "files": [
     "dist"
   ],
-  "workspaces": [
-    "examples/*"
-  ],
   "keywords": [
     "vite",
     "plugin",
@@ -44,10 +41,17 @@
     "dev": "tsup --watch",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "electron": ">=31.0.0",
     "vite": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@babel/core": "^7.28.5",
@@ -58,8 +62,10 @@
     "@eslint/js": "^9.39.1",
     "@types/babel__core": "^7.20.5",
     "@types/node": "22.18.0",
-    "electron": "^39.1.0",
+    "electron": "^43.2.0",
     "eslint": "9.39.1",
+    "globals": "14.0.0",
+    "rollup": "4.52.5",
     "tsup": "8.5.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.3",

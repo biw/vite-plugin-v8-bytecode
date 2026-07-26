@@ -9,45 +9,51 @@ on:
       - main
 
 jobs:
-  lint-and-build:
+  validate:
+    name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 22.x
+          - 24.x
+          - 26.x
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: .nvmrc
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Cache Yarn dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ runner.os }}-yarn-${{ github.ref }}-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-${{ github.ref }}-
-            ${{ runner.os }}-yarn-
+          node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure Electron sandbox
+        run: |
+          node -e 'require("electron")'
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
 
       - name: Lint
-        run: yarn lint
+        run: pnpm lint
 
       - name: Type check
-        run: yarn tsc --noEmit
-
-      - name: Test
-        run: yarn test
+        run: pnpm exec tsc --noEmit
 
       - name: Build
-        run: yarn build
+        run: pnpm build
 
       - name: Check build output
         run: |
@@ -56,3 +62,6 @@ jobs:
             exit 1
           fi
           echo "Build output verified successfully"
+
+      - name: Test
+        run: xvfb-run --auto-servernum pnpm test
