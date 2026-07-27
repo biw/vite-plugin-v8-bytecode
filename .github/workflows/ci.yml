@@ -4,28 +4,24 @@ on:
   push:
     branches:
       - main
+  # ready_for_review is required for the draft gate below to fire when a pull
+  # request leaves draft; the default event types do not include it.
   pull_request:
     branches:
       - main
-  # Electron ships patches weekly and a new major roughly every eight weeks,
-  # and each one carries a different V8. Without a timer, a break in a newly
-  # released Electron stays invisible until someone happens to open a PR.
-  schedule:
-    - cron: "0 6 * * *"
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   workflow_dispatch:
 
 jobs:
-  validate:
-    name: Node.js ${{ matrix.node-version }}
+  # Lint, type check, and build are identical on every Node version, so they
+  # run once instead of once per matrix cell.
+  static:
+    name: Lint, types, build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version:
-          - 22.x
-          - 24.x
-          - 26.x
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -38,25 +34,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24.x
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Configure Electron sandbox
-        run: |
-          node -e 'require("electron")'
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
-
-      - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install --yes xvfb
 
       - name: Lint
         run: pnpm lint
 
       - name: Type check
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
 
       - name: Build
         run: pnpm build
@@ -69,15 +56,10 @@ jobs:
           fi
           echo "Build output verified successfully"
 
-      - name: Test
-        run: xvfb-run --auto-servernum pnpm test
-
-  # Electron supports only its latest three stable majors, and that window
-  # slides every few weeks. Resolving it at run time means the schedule above
-  # picks up each new major on its own instead of testing whatever list was
-  # hardcoded when this file was last touched.
-  electron-versions:
-    name: Resolve Electron versions
+  # Node's supported release lines move on a published schedule, so they are
+  # resolved at run time for the same reason the Electron matrix is.
+  node-versions:
+    name: Resolve Node versions
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
@@ -87,114 +69,72 @@ jobs:
         with:
           node-version: 24.x
 
-      - name: Resolve supported majors
+      - name: Resolve supported releases
         id: resolve
         run: |
           node --input-type=module -e '
-            const FALLBACK = [
-              { version: "43", experimental: false },
-              { version: "42", experimental: false },
-              { version: "41", experimental: false },
-            ];
+            // Everything at or above the declared engines floor. Older lines
+            // are out of support for this package, not just for Node.
+            const FLOOR = 22;
+            const FALLBACK = ["22.x", "24.x", "26.x"];
 
-            let entries;
+            let versions;
             try {
               const response = await fetch(
-                "https://releases.electronjs.org/releases.json",
+                "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json",
                 { signal: AbortSignal.timeout(30_000) }
               );
               if (!response.ok) {
                 throw new Error("HTTP " + response.status);
               }
-              const releases = await response.json();
-              const isPrerelease = (version) =>
-                /-(alpha|beta|nightly)/.test(version);
-              const majors = [
-                ...new Set(
-                  releases
-                    .filter((release) => !isPrerelease(release.version))
-                    .map((release) => Number(release.version.split(".")[0]))
-                ),
-              ].sort((left, right) => right - left);
+              const schedule = await response.json();
+              const today = new Date().toISOString().slice(0, 10);
 
-              entries = majors.slice(0, 3).map((major) => ({
-                version: String(major),
-                experimental: false,
-              }));
+              versions = Object.entries(schedule)
+                .filter(
+                  ([name, line]) =>
+                    line.start <= today &&
+                    today < line.end &&
+                    Number(name.slice(1)) >= FLOOR
+                )
+                .map(([name]) => Number(name.slice(1)))
+                .sort((left, right) => left - right)
+                .map((major) => major + ".x");
 
-              // Alphas and betas are Electron previews, so a failure there is
-              // information rather than a defect in this repository. Marked
-              // experimental so it reports without blocking a merge.
-              const preview = releases.find((release) =>
-                /-(alpha|beta)/.test(release.version)
-              );
-              if (preview) {
-                entries.push({ version: preview.version, experimental: true });
+              if (versions.length === 0) {
+                throw new Error("no supported releases at or above " + FLOOR);
               }
             } catch (error) {
               console.error("Falling back to a pinned list:", error.message);
-              entries = FALLBACK;
+              versions = FALLBACK;
             }
 
-            console.log(JSON.stringify(entries, null, 2));
+            console.log(JSON.stringify(versions, null, 2));
             await import("node:fs").then(({ appendFileSync }) =>
               appendFileSync(
                 process.env.GITHUB_OUTPUT,
-                "matrix=" + JSON.stringify(entries) + "\n"
+                "matrix=" + JSON.stringify(versions) + "\n"
               )
             );
           '
 
-  electron:
-    name: Electron ${{ matrix.version }}
-    needs: electron-versions
+  test:
+    name: Node.js ${{ matrix.node-version }}
+    needs: node-versions
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.electron-versions.outputs.matrix) }}
+        node-version: ${{ fromJson(needs.node-versions.outputs.matrix) }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-electron
         with:
-          cache: true
+          node-version: ${{ matrix.node-version }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24.x
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Pin Electron ${{ matrix.version }}
-        run: pnpm add --save-dev electron@${{ matrix.version }}
-
-      - name: Configure Electron sandbox
-        run: |
-          node -e 'require("electron")'
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
-
-      - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install --yes xvfb
-
-      # Must follow the sandbox step: the first `require("electron")` downloads
-      # the binary and logs to stdout, which would otherwise be captured as
-      # part of the executable path below.
-      - name: Report runtime versions
-        run: |
-          ELECTRON_RUN_AS_NODE=1 "$(node -p 'require("electron")' | tail -1)" -p \
-            'JSON.stringify(process.versions, null, 2)'
-
-      - name: Test Electron runtime
-        run: |
-          xvfb-run --auto-servernum pnpm exec vitest run \
-            test/electron-asar.test.ts \
-            test/electron-comparison.test.ts \
-            test/electron-runtime.test.ts
+      - name: Test
+        run: xvfb-run --auto-servernum pnpm test

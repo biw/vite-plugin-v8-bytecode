@@ -7,7 +7,7 @@ export default defineConfig(() => ({
   format: ["esm", "cjs"],
   minify: false,
   sourcemap: true,
-  target: "node18",
+  target: "node22",
   platform: "node",
   splitting: false,
   treeshake: true,

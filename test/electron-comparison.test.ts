@@ -131,6 +131,55 @@ async function loadInNode(bytecode: Buffer): Promise<LoadResult> {
   }
 }
 
+/**
+ * Runs a prepared directory as a real Electron application.
+ *
+ * Node mode is never used anywhere in this repository. It initializes V8
+ * differently from the main process the plugin targets, so a harness built on
+ * it would be measuring the wrong runtime.
+ */
+function runElectronApplication(
+  directory: string,
+  resultPath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      VITE_BYTECODE_RESULT: resultPath,
+    };
+    delete environment.ELECTRON_RUN_AS_NODE;
+
+    const args = [`--user-data-dir=${path.join(directory, "user-data")}`];
+    if (process.platform === "linux" && process.getuid?.() === 0) {
+      args.push("--no-sandbox");
+    }
+    args.push(directory);
+
+    const child = spawn(resolveElectronPath(), args, {
+      env: environment,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const stderr: Buffer[] = [];
+
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (exitCode, signal) => {
+      if (exitCode !== 0 || signal) {
+        const details = Buffer.concat(stderr).toString("utf8").trim();
+        reject(
+          new Error(
+            `Electron exited with ${signal ?? `code ${String(exitCode)}`}${
+              details ? `: ${details}` : ""
+            }`
+          )
+        );
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 /** Loads bytecode in a real Electron main process. */
 async function loadInElectron(bytecode: Buffer): Promise<LoadResult> {
   const directory = await createLoadDirectory(
@@ -150,45 +199,7 @@ async function loadInElectron(bytecode: Buffer): Promise<LoadResult> {
         private: true,
       })
     );
-
-    await new Promise<void>((resolve, reject) => {
-      const environment: NodeJS.ProcessEnv = {
-        ...process.env,
-        VITE_BYTECODE_RESULT: resultPath,
-      };
-      // The plugin compiles in a real main process, never in Node mode, so the
-      // harness has to match or it would exercise a different V8 entry path.
-      delete environment.ELECTRON_RUN_AS_NODE;
-
-      const args = [`--user-data-dir=${path.join(directory, "user-data")}`];
-      if (process.platform === "linux" && process.getuid?.() === 0) {
-        args.push("--no-sandbox");
-      }
-      args.push(directory);
-
-      const child = spawn(resolveElectronPath(), args, {
-        env: environment,
-        stdio: ["ignore", "ignore", "pipe"],
-      });
-      const stderr: Buffer[] = [];
-
-      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-      child.on("error", reject);
-      child.on("close", (exitCode, signal) => {
-        if (exitCode !== 0 || signal) {
-          const details = Buffer.concat(stderr).toString("utf8").trim();
-          reject(
-            new Error(
-              `Electron exited with ${signal ?? `code ${String(exitCode)}`}${
-                details ? `: ${details}` : ""
-              }`
-            )
-          );
-          return;
-        }
-        resolve();
-      });
-    });
+    await runElectronApplication(directory, resultPath);
 
     return JSON.parse(await readFile(resultPath, "utf8")) as LoadResult;
   } finally {
@@ -196,26 +207,50 @@ async function loadInElectron(bytecode: Buffer): Promise<LoadResult> {
   }
 }
 
-/** Reads version metadata out of the Electron binary itself. */
-function readElectronVersions(): {
+/** Reads version metadata from a real Electron main process. */
+async function readElectronVersions(): Promise<{
   electron: string;
   node: string;
   v8: string;
-} {
-  const output = execFileSync(
-    resolveElectronPath(),
-    [
-      "-p",
-      "JSON.stringify({electron: process.versions.electron, node: process.versions.node, v8: process.versions.v8})",
-    ],
-    { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } }
-  );
+}> {
+  const directory = await mkdtemp(path.join(tmpdir(), "vite-bytecode-versions-"));
+  const resultPath = path.join(directory, "result.json");
 
-  return JSON.parse(output.trim()) as {
-    electron: string;
-    node: string;
-    v8: string;
-  };
+  try {
+    await Promise.all([
+      writeFile(
+        path.join(directory, "main.cjs"),
+        `const { app } = require("electron");
+require("node:fs").writeFileSync(
+  process.env.VITE_BYTECODE_RESULT,
+  JSON.stringify({
+    electron: process.versions.electron,
+    node: process.versions.node,
+    v8: process.versions.v8,
+  })
+);
+app.exit(0);
+`
+      ),
+      writeFile(
+        path.join(directory, "package.json"),
+        JSON.stringify({
+          main: "main.cjs",
+          name: "vite-bytecode-versions",
+          private: true,
+        })
+      ),
+    ]);
+    await runElectronApplication(directory, resultPath);
+
+    return JSON.parse(await readFile(resultPath, "utf8")) as {
+      electron: string;
+      node: string;
+      v8: string;
+    };
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 }
 
 describe.skipIf(!hasElectronDisplay)("Node and Electron bytecode runtimes", () => {
@@ -281,10 +316,14 @@ describe.skipIf(!hasElectronDisplay)("Node and Electron bytecode runtimes", () =
     );
   });
 
-  it("ships a different V8 than the host Node even when Node versions match", () => {
-    const versions = readElectronVersions();
+  it(
+    "ships a different V8 than the host Node even when Node versions match",
+    async () => {
+      const versions = await readElectronVersions();
 
-    expect(versions.electron).toBeTruthy();
-    expect(versions.v8).not.toBe(process.versions.v8);
-  });
+      expect(versions.electron).toBeTruthy();
+      expect(versions.v8).not.toBe(process.versions.v8);
+    },
+    30_000
+  );
 });
