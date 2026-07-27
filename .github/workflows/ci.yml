@@ -65,3 +65,60 @@ jobs:
 
       - name: Test
         run: xvfb-run --auto-servernum pnpm test
+
+  # Electron bundles its own V8, which is what decides bytecode compatibility.
+  # That version moves independently of the bundled Node version, so the Node
+  # matrix above proves nothing about it and it needs its own axis. Kept as a
+  # separate job rather than a second dimension to avoid a 3x3 blowup.
+  electron:
+    name: Electron ${{ matrix.electron-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        electron-version:
+          # Floor of the supported peerDependencies range, a midpoint, and latest.
+          - 31
+          - 37
+          - 43
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pin Electron ${{ matrix.electron-version }}
+        run: pnpm add --save-dev electron@${{ matrix.electron-version }}
+
+      - name: Report runtime versions
+        run: |
+          ELECTRON_RUN_AS_NODE=1 "$(node -p 'require("electron")')" -p \
+            'JSON.stringify(process.versions, null, 2)'
+
+      - name: Configure Electron sandbox
+        run: |
+          node -e 'require("electron")'
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      - name: Test Electron runtime
+        run: |
+          xvfb-run --auto-servernum pnpm exec vitest run \
+            test/electron-asar.test.ts \
+            test/electron-comparison.test.ts \
+            test/electron-runtime.test.ts
