@@ -7,6 +7,12 @@ on:
   pull_request:
     branches:
       - main
+  # Electron ships patches weekly and a new major roughly every eight weeks,
+  # and each one carries a different V8. Without a timer, a break in a newly
+  # released Electron stays invisible until someone happens to open a PR.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -66,21 +72,88 @@ jobs:
       - name: Test
         run: xvfb-run --auto-servernum pnpm test
 
-  # Electron bundles its own V8, which is what decides bytecode compatibility.
-  # That version moves independently of the bundled Node version, so the Node
-  # matrix above proves nothing about it and it needs its own axis. Kept as a
-  # separate job rather than a second dimension to avoid a 3x3 blowup.
-  electron:
-    name: Electron ${{ matrix.electron-version }}
+  # Electron supports only its latest three stable majors, and that window
+  # slides every few weeks. Resolving it at run time means the schedule above
+  # picks up each new major on its own instead of testing whatever list was
+  # hardcoded when this file was last touched.
+  electron-versions:
+    name: Resolve Electron versions
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Resolve supported majors
+        id: resolve
+        run: |
+          node --input-type=module -e '
+            const FALLBACK = [
+              { version: "43", experimental: false },
+              { version: "42", experimental: false },
+              { version: "41", experimental: false },
+            ];
+
+            let entries;
+            try {
+              const response = await fetch(
+                "https://releases.electronjs.org/releases.json",
+                { signal: AbortSignal.timeout(30_000) }
+              );
+              if (!response.ok) {
+                throw new Error("HTTP " + response.status);
+              }
+              const releases = await response.json();
+              const isPrerelease = (version) =>
+                /-(alpha|beta|nightly)/.test(version);
+              const majors = [
+                ...new Set(
+                  releases
+                    .filter((release) => !isPrerelease(release.version))
+                    .map((release) => Number(release.version.split(".")[0]))
+                ),
+              ].sort((left, right) => right - left);
+
+              entries = majors.slice(0, 3).map((major) => ({
+                version: String(major),
+                experimental: false,
+              }));
+
+              // Alphas and betas are Electron previews, so a failure there is
+              // information rather than a defect in this repository. Marked
+              // experimental so it reports without blocking a merge.
+              const preview = releases.find((release) =>
+                /-(alpha|beta)/.test(release.version)
+              );
+              if (preview) {
+                entries.push({ version: preview.version, experimental: true });
+              }
+            } catch (error) {
+              console.error("Falling back to a pinned list:", error.message);
+              entries = FALLBACK;
+            }
+
+            console.log(JSON.stringify(entries, null, 2));
+            await import("node:fs").then(({ appendFileSync }) =>
+              appendFileSync(
+                process.env.GITHUB_OUTPUT,
+                "matrix=" + JSON.stringify(entries) + "\n"
+              )
+            );
+          '
+
+  electron:
+    name: Electron ${{ matrix.version }}
+    needs: electron-versions
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        electron-version:
-          # Floor of the supported peerDependencies range, a midpoint, and latest.
-          - 31
-          - 37
-          - 43
+        include: ${{ fromJson(needs.electron-versions.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -99,8 +172,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Pin Electron ${{ matrix.electron-version }}
-        run: pnpm add --save-dev electron@${{ matrix.electron-version }}
+      - name: Pin Electron ${{ matrix.version }}
+        run: pnpm add --save-dev electron@${{ matrix.version }}
 
       - name: Configure Electron sandbox
         run: |
