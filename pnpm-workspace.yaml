@@ -3,6 +3,10 @@ packages:
 
 allowBuilds:
   electron: true
+  # Pulled in transitively by electron-builder. Its postinstall only prepares
+  # Squirrel installer tooling, which the packaging tests never invoke, so the
+  # build stays off and pnpm does not stop to ask.
+  electron-winstaller: false
   esbuild: true
 
 overrides:
