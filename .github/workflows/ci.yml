@@ -102,11 +102,6 @@ jobs:
       - name: Pin Electron ${{ matrix.electron-version }}
         run: pnpm add --save-dev electron@${{ matrix.electron-version }}
 
-      - name: Report runtime versions
-        run: |
-          ELECTRON_RUN_AS_NODE=1 "$(node -p 'require("electron")')" -p \
-            'JSON.stringify(process.versions, null, 2)'
-
       - name: Configure Electron sandbox
         run: |
           node -e 'require("electron")'
@@ -115,6 +110,14 @@ jobs:
 
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      # Must follow the sandbox step: the first `require("electron")` downloads
+      # the binary and logs to stdout, which would otherwise be captured as
+      # part of the executable path below.
+      - name: Report runtime versions
+        run: |
+          ELECTRON_RUN_AS_NODE=1 "$(node -p 'require("electron")' | tail -1)" -p \
+            'JSON.stringify(process.versions, null, 2)'
 
       - name: Test Electron runtime
         run: |
