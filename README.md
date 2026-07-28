@@ -93,9 +93,10 @@ is specific to the target V8 build, operating system, and architecture, so the
 build host must be able to run the same Electron distribution as the packaged
 application.
 
-The plugin does not transform Electron renderer bundles. Keep
-`contextIsolation: true`, `nodeIntegration: false`, and expose narrowly scoped
-APIs from a preload script through `contextBridge`.
+The plugin does not transform Electron renderer bundles, and bytecode cannot be
+used for preload scripts either. Keep `contextIsolation: true`,
+`nodeIntegration: false`, and expose narrowly scoped APIs from a preload script
+through `contextBridge` — written as ordinary JavaScript, not bytecode.
 
 ### CommonJS output in ESM packages
 
@@ -266,7 +267,9 @@ The plugin automatically injects a bytecode loader (`bytecode-loader.cjs`) that:
 
 - **CommonJS Only**: The plugin only supports CommonJS output format. ES modules are not supported for bytecode compilation.
 - **Production Only**: Automatically disabled in development mode (when `NODE_ENV !== 'production'`)
-- **Not for Renderer**: Cannot be used with Vite's renderer configuration in Electron apps
+- **Main process only**: Bytecode is for the Electron main process. It cannot be used for renderer or preload code, for two separate reasons:
+  - The plugin detects Vite's renderer configuration and disables itself, leaving renderer bundles as plain JavaScript.
+  - Preload scripts cannot load bytecode in either sandbox mode. With `sandbox: true`, Electron's default, a preload's `require` resolves only built-in modules, so the generated `bytecode-loader.cjs` cannot be reached. With `sandbox: false` the loader is reachable, but preload runs in the renderer process, where V8 rejects cached data produced by the main process (`cachedDataRejected`).
 - **V8 Version Compatibility**: Bytecode is V8-build-specific. Use `runtime: "electron"` for Electron main-process output and build Node output under the Node version that will execute it.
 - **Host-compatible builds**: Electron bytecode cannot be cross-compiled for another operating system or architecture.
 
