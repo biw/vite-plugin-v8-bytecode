@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Plugin, Logger } from "vite";
+import type { Plugin, Logger, PluginOption } from "vite";
 import type {
   OutputBundle,
   OutputChunk,
@@ -16,7 +16,9 @@ import { rewriteRequireSpecifiers, transformCode } from "./transforms";
 import { toRelativePath, resolveBuildOutputs, normalizePath } from "./utils";
 
 const bytecodeChunkExtensionRE = /\.(jsc|cjsc)$/;
+const electronViteMainPluginName = "vite:electron-main-config-preset";
 const electronViteRendererPluginPrefix = "vite:electron-renderer-";
+const commonJsPackageJson = '{\n  "type": "commonjs"\n}\n';
 
 interface CommonBytecodeOptions {
   /**
@@ -112,6 +114,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   let logger: Logger;
   let enabled = false;
   let configRoot = process.cwd();
+  let hasNonCommonJsOutput = false;
   const selectedChunkFileNames = new Set<string>();
 
   return {
@@ -119,9 +122,80 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
     apply: "build",
     enforce: "post",
 
+    config: {
+      // Run before framework presets so their inferred ES format is not
+      // mistaken for a format the user explicitly selected.
+      order: "pre",
+      handler(config) {
+        if (
+          hasPluginNamed(config.plugins, (name) =>
+            name.startsWith(electronViteRendererPluginPrefix)
+          )
+        ) {
+          return;
+        }
+
+        const build = config.build;
+        const output = build?.rollupOptions?.output;
+        if (Array.isArray(output)) {
+          return;
+        }
+
+        const library = build?.lib;
+        const libraryFormats =
+          library && library.formats ? library.formats : [];
+        const hasExplicitFormat =
+          output?.format !== undefined || libraryFormats.length > 0;
+        const useElectronViteMainDefaults = hasPluginNamed(
+          config.plugins,
+          (name) => name === electronViteMainPluginName
+        );
+        const outputDefaults = {
+          ...(!hasExplicitFormat && !library
+            ? { format: "cjs" as const }
+            : {}),
+          ...(useElectronViteMainDefaults &&
+          output?.entryFileNames === undefined
+            ? { entryFileNames: "[name].js" }
+            : {}),
+        };
+        const libraryDefaults =
+          !hasExplicitFormat && library
+            ? {
+                ...library,
+                formats: ["cjs" as const],
+              }
+            : undefined;
+
+        if (
+          Object.keys(outputDefaults).length === 0 &&
+          !libraryDefaults
+        ) {
+          return;
+        }
+
+        return {
+          build: {
+            ...(libraryDefaults ? { lib: libraryDefaults } : {}),
+            ...(Object.keys(outputDefaults).length > 0
+              ? {
+                  rollupOptions: {
+                    output: {
+                      ...output,
+                      ...outputDefaults,
+                    },
+                  },
+                }
+              : {}),
+          },
+        };
+      },
+    },
+
     configResolved(config): void {
       logger = config.logger;
       enabled = false;
+      hasNonCommonJsOutput = false;
       selectedChunkFileNames.clear();
       configRoot = config.root;
 
@@ -147,7 +221,10 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           ? resolvedOutputs
           : [resolvedOutputs];
 
-        if (outputs.some((output) => output.format !== "cjs")) {
+        hasNonCommonJsOutput = outputs.some(
+          (output) => output.format !== "cjs"
+        );
+        if (hasNonCommonJsOutput) {
           config.logger.warn(
             "bytecodePlugin only supports CommonJS output. " +
               "Non-CommonJS outputs will be left unchanged."
@@ -193,40 +270,63 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           isBytecodeChunk(chunk.name, outputOptions)
       );
 
-      if (chunks.length === 0) {
-        return;
-      }
-
       const bytecodeFileNames = new Map(
         chunks.map((chunk) => [
           normalizePath(chunk.fileName),
           getBytecodeFileName(normalizePath(chunk.fileName)),
         ])
       );
-      const incompatibleChunk = allChunks.find(
-        (chunk) => {
-          const normalizedFileName = normalizePath(chunk.fileName);
-          return (
-            /\.js$/i.test(normalizedFileName) &&
+      const commonJsJavaScriptChunks = allChunks.filter((chunk) => {
+        const normalizedFileName = normalizePath(chunk.fileName);
+        return (
+          /\.js$/i.test(normalizedFileName) &&
+          (chunk.isEntry || !bytecodeFileNames.has(normalizedFileName))
+        );
+      });
+      // Preserve stable entry paths such as Electron's `out/main/index.js`.
+      // A nested package boundary makes those files CommonJS without changing
+      // the application manifest that points to them.
+      if (
+        !hasNonCommonJsOutput &&
+        commonJsJavaScriptChunks.some(
+          (chunk) =>
             getOutputPackageType(
-              normalizedFileName,
+              normalizePath(chunk.fileName),
               outputOptions,
               output,
               configRoot
-            ) === "module" &&
-            (chunk.isEntry || !bytecodeFileNames.has(normalizedFileName))
-          );
-        }
+            ) === "module"
+        ) &&
+        canEmitCommonJsPackageBoundary(outputOptions, output, configRoot)
+      ) {
+        this.emitFile({
+          type: "asset",
+          fileName: "package.json",
+          source: commonJsPackageJson,
+        });
+      }
+      const incompatibleChunk = commonJsJavaScriptChunks.find(
+        (chunk) =>
+          getOutputPackageType(
+            normalizePath(chunk.fileName),
+            outputOptions,
+            output,
+            configRoot
+          ) === "module"
       );
       if (incompatibleChunk) {
         this.error(
           `Cannot emit CommonJS ${
             incompatibleChunk.isEntry ? "entry" : "chunk"
           } "${incompatibleChunk.fileName}" because ` +
-            'the nearest package.json has "type": "module". Configure ' +
-            "Rollup entryFileNames and chunkFileNames to use the " +
-            '".cjs" extension.'
+            'the nearest output package.json has "type": "module". ' +
+            "Use the \".cjs\" extension or change that output package " +
+            "boundary to CommonJS."
         );
+      }
+
+      if (chunks.length === 0) {
+        return;
       }
 
       const getBytecodeLoaderBlock = (chunkFileName: string): string => {
@@ -539,6 +639,26 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+function hasPluginNamed(
+  plugins: PluginOption[] | undefined,
+  predicate: (name: string) => boolean
+): boolean {
+  const visit = (plugin: PluginOption): boolean => {
+    if (Array.isArray(plugin)) {
+      return plugin.some(visit);
+    }
+    return (
+      !!plugin &&
+      typeof plugin === "object" &&
+      "name" in plugin &&
+      typeof plugin.name === "string" &&
+      predicate(plugin.name)
+    );
+  };
+
+  return plugins?.some(visit) ?? false;
+}
+
 interface PackageTypeBoundary {
   found: boolean;
   type?: string;
@@ -584,17 +704,41 @@ function reserveUniqueFileName(
   return fileName;
 }
 
+function getOutputDirectory(
+  outputOptions: OutputOptions,
+  configRoot: string
+): string {
+  return outputOptions.dir
+    ? path.resolve(configRoot, outputOptions.dir)
+    : outputOptions.file
+      ? path.dirname(path.resolve(configRoot, outputOptions.file))
+      : configRoot;
+}
+
+function canEmitCommonJsPackageBoundary(
+  outputOptions: OutputOptions,
+  output: OutputBundle,
+  configRoot: string
+): boolean {
+  if (output["package.json"]) {
+    return false;
+  }
+
+  const outputDirectory = getOutputDirectory(outputOptions, configRoot);
+  if (readPackageTypeBoundary(outputDirectory).found) {
+    return false;
+  }
+
+  return findNearestPackageType(path.dirname(outputDirectory)) === "module";
+}
+
 function getOutputPackageType(
   fileName: string,
   outputOptions: OutputOptions,
   output: OutputBundle,
   configRoot: string
 ): string | undefined {
-  const outputDirectory = outputOptions.dir
-    ? path.resolve(configRoot, outputOptions.dir)
-    : outputOptions.file
-      ? path.dirname(path.resolve(configRoot, outputOptions.file))
-      : configRoot;
+  const outputDirectory = getOutputDirectory(outputOptions, configRoot);
   let directory = path.posix.dirname(normalizePath(fileName));
 
   while (true) {

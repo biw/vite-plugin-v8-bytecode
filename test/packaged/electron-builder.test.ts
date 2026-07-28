@@ -50,9 +50,9 @@ if (process.env.REQUIRE_PACKAGED_TESTS && !packagerAvailable) {
  * entry is bundled by Vite, which statically replaces `process.env` reads.
  */
 const entrySource = `
-const { app } = require("electron");
-const fs = require("node:fs");
-const path = require("node:path");
+import { app } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 
 const answer = [20, 22].reduce((total, value) => total + value, 0);
 
@@ -221,12 +221,23 @@ describe.skipIf(!packagerAvailable || unsupported)(
     const appDirectory = path.join(workingDirectory, "app");
     const outputDirectory = path.join(workingDirectory, "out");
     const userDataDirectory = path.join(workingDirectory, "user-data");
-    const entryPath = path.join(appDirectory, "main.cjs");
+    const entryPath = path.join(appDirectory, "src", "main.js");
     const priorNodeEnv = process.env.NODE_ENV;
 
     try {
-      await mkdir(appDirectory, { recursive: true });
-      await writeFile(entryPath, entrySource);
+      await mkdir(path.dirname(entryPath), { recursive: true });
+      await Promise.all([
+        writeFile(entryPath, entrySource),
+        writeFile(
+          path.join(appDirectory, "package.json"),
+          JSON.stringify({
+            main: "dist/main.js",
+            name: "bytecode-fixture",
+            type: "module",
+            version: "1.0.0",
+          })
+        ),
+      ]);
 
       process.env.NODE_ENV = "production";
       await viteBuild({
@@ -240,24 +251,14 @@ describe.skipIf(!packagerAvailable || unsupported)(
         ],
         root: appDirectory,
         build: {
-          emptyOutDir: false,
-          outDir: appDirectory,
+          outDir: path.join(appDirectory, "dist"),
           rollupOptions: {
             external: ["electron", /^node:/],
             input: entryPath,
-            output: { entryFileNames: "main.cjs", format: "cjs" },
+            output: { entryFileNames: "main.js" },
           },
         },
       });
-
-      await writeFile(
-        path.join(appDirectory, "package.json"),
-        JSON.stringify({
-          main: "main.cjs",
-          name: "bytecode-fixture",
-          version: "1.0.0",
-        })
-      );
 
       // Imported through a variable specifier on purpose: the packager is
       // installed only in the packaging job, so a literal specifier would make
@@ -320,9 +321,14 @@ describe.skipIf(!packagerAvailable || unsupported)(
   });
 
   it("ships the bytecode inside the archive rather than beside it", () => {
-    expect(archiveContents).toContain(path.sep === "\\" ? "\\main.cjsc" : "/main.cjsc");
+    expect(archiveContents).toContain(
+      path.sep === "\\" ? "\\dist\\main.jsc" : "/dist/main.jsc"
+    );
     expect(archiveContents.some((entry) => entry.endsWith("bytecode-loader.cjs"))).toBe(
       true
+    );
+    expect(archiveContents).toContain(
+      path.sep === "\\" ? "\\dist\\package.json" : "/dist/package.json"
     );
   });
   }

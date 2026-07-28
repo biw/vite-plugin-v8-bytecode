@@ -129,9 +129,9 @@ if (process.env.CI && !hasElectronDisplay) {
 }
 
 describe.skipIf(!hasElectronDisplay)("electron-vite integration", () => {
-  it(
-    "keeps a context-isolated renderer as plain JavaScript when a plugin instance is reused",
-    async () => {
+  it.each(["commonjs", "module"] as const)(
+    "builds a type-%s main process and leaves the renderer as JavaScript",
+    async (packageType) => {
       const applicationDirectory = await realpath(
         await mkdtemp(path.join(tmpdir(), "vite-bytecode-electron-vite-"))
       );
@@ -175,11 +175,11 @@ describe.skipIf(!hasElectronDisplay)("electron-vite integration", () => {
             `module.exports = ${JSON.stringify(resolveElectronPath())};`
           ),
           writeFile(
-            path.join(mainDirectory, "index.cjs"),
+            path.join(mainDirectory, "index.js"),
             `
-const { app, BrowserWindow } = require("electron");
-const fs = require("node:fs");
-const path = require("node:path");
+import { app, BrowserWindow } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 
 app.whenReady().then(async () => {
   const window = new BrowserWindow({
@@ -204,12 +204,16 @@ app.whenReady().then(async () => {
             'globalThis.rendererResult = { answer: 42, requireType: typeof require };'
           ),
           writeFile(
+            path.join(rendererDirectory, "index.html"),
+            '<script type="module" src="./renderer.js"></script>'
+          ),
+          writeFile(
             path.join(applicationDirectory, "package.json"),
             JSON.stringify({
-              main: "out/main/index.cjs",
+              main: "out/main/index.js",
               name: "vite-bytecode-electron-vite",
               private: true,
-              type: "commonjs",
+              type: packageType,
             })
           ),
           writeFile(
@@ -223,31 +227,13 @@ if (!sharedPlugin) {
 export default {
   main: {
     root: ${JSON.stringify(applicationDirectory)},
-    plugins: [sharedPlugin],
-    build: {
-      outDir: ${JSON.stringify(path.join(outputDirectory, "main"))},
-      rollupOptions: {
-        input: ${JSON.stringify(path.join(mainDirectory, "index.cjs"))},
-        output: {
-          chunkFileNames: "[name]-[hash].cjs",
-          entryFileNames: "index.cjs",
-          format: "cjs"
-        }
-      }
-    }
+    plugins: [sharedPlugin]
   },
   renderer: {
     root: ${JSON.stringify(rendererDirectory)},
     plugins: [sharedPlugin],
     build: {
-      outDir: ${JSON.stringify(path.join(outputDirectory, "renderer"))},
-      rollupOptions: {
-        input: ${JSON.stringify(path.join(rendererDirectory, "renderer.js"))},
-        output: {
-          entryFileNames: "renderer.js",
-          format: "cjs"
-        }
-      }
+      outDir: ${JSON.stringify(path.join(outputDirectory, "renderer"))}
     }
   }
 };
@@ -260,10 +246,6 @@ export default {
           logLevel: "silent",
           root: applicationDirectory,
         });
-        await writeFile(
-          path.join(outputDirectory, "renderer", "index.html"),
-          '<script src="./renderer.js"></script>'
-        );
 
         const mainFiles = await listFiles(path.join(outputDirectory, "main"));
         const rendererFiles = await listFiles(
@@ -272,11 +254,36 @@ export default {
         expect(mainFiles).toEqual(
           expect.arrayContaining([
             "bytecode-loader.cjs",
-            "index.cjs",
-            "index.cjsc",
+            "index.js",
+            "index.jsc",
           ])
         );
-        expect(rendererFiles).toEqual(["index.html", "renderer.js"]);
+        expect(mainFiles.includes("package.json")).toBe(
+          packageType === "module"
+        );
+        expect(rendererFiles).toContain("index.html");
+        expect(rendererFiles.some((file) => /\.js$/.test(file))).toBe(true);
+        expect(rendererFiles.every((file) => !/\.c?jsc$/.test(file))).toBe(
+          true
+        );
+        if (packageType === "module") {
+          expect(
+            JSON.parse(
+              await readFile(
+                path.join(outputDirectory, "main", "package.json"),
+                "utf8"
+              )
+            )
+          ).toEqual({ type: "commonjs" });
+        }
+        expect(
+          JSON.parse(
+            await readFile(
+              path.join(applicationDirectory, "package.json"),
+              "utf8"
+            )
+          ).main
+        ).toBe("out/main/index.js");
 
         await runElectronApplication(applicationDirectory, {
           VITE_BYTECODE_RENDERER_RESULT: resultPath,
