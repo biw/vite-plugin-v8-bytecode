@@ -4,16 +4,9 @@ on:
   push:
     branches:
       - main
-  # ready_for_review is required for the draft gate below to fire when a pull
-  # request leaves draft; the default event types do not include it.
   pull_request:
     branches:
       - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
   workflow_dispatch:
 
 jobs:
