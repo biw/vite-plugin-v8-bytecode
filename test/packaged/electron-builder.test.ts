@@ -16,10 +16,21 @@ import { bytecodePlugin } from "../../src/index";
  * exists at all.
  */
 
+const packagerSpecifier = "electron-builder";
+
+/** Just the surface this file uses, so the packager needs no type dependency. */
+type ElectronBuilder = {
+  Platform: { current: () => { createTarget: (name: string) => unknown } };
+  build: (options: {
+    config: Record<string, unknown>;
+    targets: unknown;
+  }) => Promise<unknown>;
+};
+
 const projectRequire = createRequire(import.meta.url);
 const packagerAvailable = (() => {
   try {
-    projectRequire.resolve("electron-builder");
+    projectRequire.resolve(packagerSpecifier);
     return true;
   } catch {
     return false;
@@ -248,7 +259,12 @@ describe.skipIf(!packagerAvailable || unsupported)(
         })
       );
 
-      const { build: packageApp, Platform } = await import("electron-builder");
+      // Imported through a variable specifier on purpose: the packager is
+      // installed only in the packaging job, so a literal specifier would make
+      // `tsc --noEmit` fail everywhere else.
+      const { build: packageApp, Platform } = (await import(
+        packagerSpecifier
+      )) as ElectronBuilder;
       await packageApp({
         targets: Platform.current().createTarget("dir"),
         config: {
