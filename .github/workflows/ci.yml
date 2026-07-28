@@ -137,4 +137,5 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Test
-        run: xvfb-run --auto-servernum pnpm test
+        shell: bash
+        run: $ELECTRON_LAUNCH_PREFIX pnpm test

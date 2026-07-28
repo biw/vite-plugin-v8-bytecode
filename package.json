@@ -41,6 +41,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:electron": "vitest run test/electron-*.test.ts",
+    "test:packaged": "vitest run --config vitest.packaged.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
