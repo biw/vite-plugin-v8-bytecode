@@ -3,19 +3,19 @@ import type { PluginObj, PluginPass } from "@babel/core";
 import MagicString from "magic-string";
 import type { SourceMapInput } from "rollup";
 
-interface ProtectStringsPluginState extends PluginPass {
-  opts: { protectedStrings: Set<string> };
+interface ObfuscateStringsPluginState extends PluginPass {
+  opts: { obfuscatedStrings: Set<string> };
 }
 
 const CHAR_CODE_CHUNK_SIZE = 4096;
 
 /**
- * Babel plugin that protects specific strings by converting them to String.fromCharCode calls
- * This adds an extra layer of obfuscation on top of bytecode compilation
+ * Obfuscates selected string literals by converting them to
+ * String.fromCharCode calls. This prevents verbatim storage but is reversible.
  */
-function protectStringsPlugin(
+function obfuscateStringsPlugin(
   api: typeof babel
-): PluginObj<ProtectStringsPluginState> {
+): PluginObj<ObfuscateStringsPluginState> {
   const { types: t } = api;
 
   function createFromCharCodeFunction(
@@ -25,7 +25,7 @@ function protectStringsPlugin(
     const program = path.findParent((parent) => parent.isProgram());
     if (!program?.isProgram()) {
       throw path.buildCodeFrameError(
-        "Protected strings must be contained in a JavaScript program"
+        "Obfuscated strings must be contained in a JavaScript program"
       );
     }
 
@@ -35,8 +35,8 @@ function protectStringsPlugin(
     const characterCodes = program.scope.generateUidIdentifier("characterCodes");
 
     // Capture the intrinsic before any user code can shadow or replace String.
-    // One capture is emitted per protected literal so the generated code still
-    // makes each protected value independently identifiable.
+    // One capture is emitted per selected literal so the generated code still
+    // makes each obfuscated value independently identifiable.
     program.unshiftContainer(
       "body",
       t.variableDeclaration("const", [
@@ -131,7 +131,7 @@ function protectStringsPlugin(
   }
 
   return {
-    name: "protect-strings-plugin",
+    name: "obfuscate-strings-plugin",
     visitor: {
       StringLiteral(path, state) {
         // Skip obj['property']
@@ -162,7 +162,7 @@ function protectStringsPlugin(
         // Only CommonJS is supported for Node.js 22+, import/export checks are ignored
 
         const { value } = path.node;
-        if (state.opts.protectedStrings.has(value)) {
+        if (state.opts.obfuscatedStrings.has(value)) {
           path.replaceWith(createFromCharCodeFunction(path, value));
         }
       },
@@ -180,7 +180,7 @@ function protectStringsPlugin(
 
         // Extract the cooked value of the template literal
         const value = path.node.quasis[0].value.cooked;
-        if (value && state.opts.protectedStrings.has(value)) {
+        if (value && state.opts.obfuscatedStrings.has(value)) {
           path.replaceWith(createFromCharCodeFunction(path, value));
         }
       },
@@ -275,11 +275,11 @@ function templateLiteralToConcatPlugin(api: typeof babel): PluginObj {
 
 /**
  * Transforms code using Babel with untagged template literal conversion and
- * optional string protection.
+ * optional string obfuscation.
  */
 export function transformCode(
   code: string,
-  protectedStrings: string[],
+  obfuscatedStrings: string[],
   sourceMaps: boolean = false
 ): { code: string; map?: SourceMapInput } | null {
   const plugins: babel.PluginItem[] = [
@@ -287,11 +287,11 @@ export function transformCode(
     templateLiteralToConcatPlugin,
   ];
 
-  // Add string protection if needed
-  if (protectedStrings.length > 0) {
+  // Add string obfuscation if needed.
+  if (obfuscatedStrings.length > 0) {
     plugins.push([
-      protectStringsPlugin,
-      { protectedStrings: new Set(protectedStrings) },
+      obfuscateStringsPlugin,
+      { obfuscatedStrings: new Set(obfuscatedStrings) },
     ]);
   }
 

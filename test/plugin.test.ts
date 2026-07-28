@@ -8,6 +8,7 @@ import type { RollupOutput } from "rollup";
 import { bytecodePlugin } from "../src/index";
 
 describe("bytecodePlugin output formats", () => {
+  const obfuscatedMarker = "INTERNAL_PROTOCOL_MARKER";
   let fixtureDir: string;
   let originalNodeEnv: string | undefined;
 
@@ -72,16 +73,16 @@ describe("bytecodePlugin output formats", () => {
     strict?: boolean;
   } = {}): Promise<RollupOutput> {
     const entryPath = path.join(fixtureDir, "split-entry.js");
-    const secretPath = path.join(fixtureDir, "split-secret.js");
+    const markerPath = path.join(fixtureDir, "split-marker.js");
     fs.writeFileSync(
       entryPath,
-      ['import { secret } from "./split-secret.js";', "console.log(secret);"].join(
+      ['import { marker } from "./split-marker.js";', "console.log(marker);"].join(
         "\n"
       )
     );
     fs.writeFileSync(
-      secretPath,
-      'export const secret = "TOP_SECRET_VALUE";\n'
+      markerPath,
+      `export const marker = ${JSON.stringify(obfuscatedMarker)};\n`
     );
 
     return (await build({
@@ -89,8 +90,8 @@ describe("bytecodePlugin output formats", () => {
       logLevel: "silent",
       plugins: [
         bytecodePlugin({
-          chunkAlias: "secret",
-          protectedStrings: ["TOP_SECRET_VALUE"],
+          chunkAlias: "marker",
+          obfuscatedStrings: [obfuscatedMarker],
         }),
       ],
       build: {
@@ -104,8 +105,8 @@ describe("bytecodePlugin output formats", () => {
             entryFileNames: "entry.cjs",
             chunkFileNames: "[name].js",
             manualChunks(id) {
-              if (id.endsWith("split-secret.js")) {
-                return "secret";
+              if (id.endsWith("split-marker.js")) {
+                return "marker";
               }
             },
           },
@@ -128,6 +129,17 @@ describe("bytecodePlugin output formats", () => {
 
     return outputDir;
   }
+
+  it("rejects the removed option with safe migration guidance", () => {
+    expect(() =>
+      bytecodePlugin({
+        protectedStrings: ["LEGACY_VALUE"],
+      } as never)
+    ).toThrow(
+      '"protectedStrings" was renamed to "obfuscatedStrings". ' +
+        "It provides reversible obfuscation only and must not be used for secrets."
+    );
+  });
 
   it("does not crash when library formats use Vite defaults", async () => {
     const outputs = await buildLibrary();
@@ -475,16 +487,38 @@ describe("bytecodePlugin output formats", () => {
     const entryCode = entry?.type === "chunk" ? entry.code : "";
 
     expect(entryCode).toContain('require("./bytecode-loader.cjs")');
-    expect(entryCode).toContain('require("./secret.jsc")');
+    expect(entryCode).toContain('require("./marker.jsc")');
   });
 
   it("does not leave source maps for removed JavaScript chunks", async () => {
     const result = await buildSplitChunk({ sourcemap: true });
     const files = result.output.map((file) => file.fileName);
 
-    expect(files).toContain("secret.jsc");
-    expect(files).not.toContain("secret.js");
-    expect(files).not.toContain("secret.js.map");
+    expect(files).toContain("marker.jsc");
+    expect(files).not.toContain("marker.js");
+    expect(files).not.toContain("marker.js.map");
+  });
+
+  it("does not store an obfuscated literal verbatim in bytecode", async () => {
+    const result = await buildSplitChunk();
+    const bytecode = result.output.find(
+      (file) => file.type === "asset" && file.fileName === "marker.jsc"
+    );
+
+    expect(bytecode?.type).toBe("asset");
+    if (!bytecode || bytecode.type !== "asset") {
+      throw new Error("Expected marker.jsc to be emitted as a bytecode asset");
+    }
+
+    const bytes =
+      typeof bytecode.source === "string"
+        ? Buffer.from(bytecode.source)
+        : Buffer.from(
+            bytecode.source.buffer,
+            bytecode.source.byteOffset,
+            bytecode.source.byteLength
+          );
+    expect(bytes.includes(Buffer.from(obfuscatedMarker))).toBe(false);
   });
 
   it("rewrites only exact bytecode chunk filenames", async () => {
@@ -1165,16 +1199,16 @@ describe("bytecodePlugin output formats", () => {
   });
 
   it("does not emit stale plaintext source maps for bytecode-only chunks", async () => {
-    const protectedValue = "SOURCE_MAP_SECRET_VALUE";
+    const obfuscatedValue = "SOURCE_MAP_MARKER";
     fs.writeFileSync(
       path.join(fixtureDir, "entry.js"),
-      `export const secret = ${JSON.stringify(protectedValue)};\n`
+      `export const marker = ${JSON.stringify(obfuscatedValue)};\n`
     );
 
     const buildResult = await build({
       configFile: false,
       logLevel: "silent",
-      plugins: [bytecodePlugin({ protectedStrings: [protectedValue] })],
+      plugins: [bytecodePlugin({ obfuscatedStrings: [obfuscatedValue] })],
       build: {
         write: false,
         sourcemap: true,
@@ -1202,7 +1236,7 @@ describe("bytecodePlugin output formats", () => {
       .join("\n");
 
     expect(sourceMaps).toEqual([]);
-    expect(emittedText).not.toContain(protectedValue);
+    expect(emittedText).not.toContain(obfuscatedValue);
   });
 
   it("rejects conflicting bytecode loader assets", async () => {

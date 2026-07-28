@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { transformCode } from "../src/transforms";
 
-describe("String Protection Transform", () => {
+describe("String Obfuscation Transform", () => {
   describe("transformCode", () => {
-    it("should still transform template literals even with no protected strings", () => {
+    it("should still transform template literals even with no obfuscated strings", () => {
       const code = "const x = `test`;";
       const result = transformCode(code, []);
 
@@ -12,68 +12,68 @@ describe("String Protection Transform", () => {
       expect(result!.code).not.toContain("`");
     });
 
-    it("should transform protected string literals", () => {
-      const code = 'const secret = "MY_SECRET_KEY";';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+    it("should transform obfuscated string literals", () => {
+      const code = 'const marker = "OBFUSCATED_VALUE";';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
-      expect(result!.code).not.toContain('"MY_SECRET_KEY"');
+      expect(result!.code).not.toContain('"OBFUSCATED_VALUE"');
       expect(result!.code).toContain("String.fromCharCode");
       expect(result!.code).toContain("function");
     });
 
-    it("should transform protected template literals", () => {
-      const code = "const secret = `MY_SECRET_KEY`;";
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+    it("should transform obfuscated template literals", () => {
+      const code = "const marker = `OBFUSCATED_VALUE`;";
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
-      expect(result!.code).not.toContain("`MY_SECRET_KEY`");
+      expect(result!.code).not.toContain("`OBFUSCATED_VALUE`");
       expect(result!.code).toContain("String.fromCharCode");
     });
 
-    it("should not transform non-protected strings", () => {
-      const code = 'const x = "normal"; const y = "MY_SECRET_KEY";';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+    it("should not transform non-obfuscated strings", () => {
+      const code = 'const x = "normal"; const y = "OBFUSCATED_VALUE";';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
       expect(result!.code).toContain('"normal"');
-      expect(result!.code).not.toContain('"MY_SECRET_KEY"');
+      expect(result!.code).not.toContain('"OBFUSCATED_VALUE"');
     });
 
     it("should skip object keys", () => {
-      const code = 'const obj = { "MY_SECRET_KEY": "value" };';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+      const code = 'const obj = { "OBFUSCATED_VALUE": "value" };';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
       // Object key should not be transformed
-      expect(result!.code).toContain('"MY_SECRET_KEY"');
+      expect(result!.code).toContain('"OBFUSCATED_VALUE"');
     });
 
     it("should skip require() paths", () => {
-      const code = 'const x = require("MY_SECRET_KEY");';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+      const code = 'const x = require("OBFUSCATED_VALUE");';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
       // Require path should not be transformed
-      expect(result!.code).toContain('"MY_SECRET_KEY"');
+      expect(result!.code).toContain('"OBFUSCATED_VALUE"');
     });
 
     it("should skip computed member expressions", () => {
-      const code = 'const x = obj["MY_SECRET_KEY"];';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+      const code = 'const x = obj["OBFUSCATED_VALUE"];';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
       // Member expression should not be transformed
-      expect(result!.code).toContain('"MY_SECRET_KEY"');
+      expect(result!.code).toContain('"OBFUSCATED_VALUE"');
     });
 
-    it("should transform multiple protected strings", () => {
-      const code = 'const a = "SECRET1"; const b = "SECRET2";';
-      const result = transformCode(code, ["SECRET1", "SECRET2"]);
+    it("should transform multiple obfuscated strings", () => {
+      const code = 'const a = "VALUE_ONE"; const b = "VALUE_TWO";';
+      const result = transformCode(code, ["VALUE_ONE", "VALUE_TWO"]);
 
       expect(result).not.toBeNull();
-      expect(result!.code).not.toContain('"SECRET1"');
-      expect(result!.code).not.toContain('"SECRET2"');
+      expect(result!.code).not.toContain('"VALUE_ONE"');
+      expect(result!.code).not.toContain('"VALUE_TWO"');
       // Should have two fromCharCode calls
       expect((result!.code.match(/String\.fromCharCode/g) || []).length).toBe(
         2
@@ -88,7 +88,7 @@ describe("String Protection Transform", () => {
       expect(result!.code).toContain("String.fromCharCode");
     });
 
-    it("should preserve non-BMP characters in protected strings", () => {
+    it("should preserve non-BMP characters in obfuscated strings", () => {
       const code = 'const result = "A🔐Z";';
       const transformed = transformCode(code, ["A🔐Z"]);
 
@@ -97,14 +97,14 @@ describe("String Protection Transform", () => {
       expect(result).toBe("A🔐Z");
     });
 
-    it("should protect large strings without exceeding runtime argument limits", () => {
-      const protectedValue = "x".repeat(150_000);
-      const code = `const result = ${JSON.stringify(protectedValue)};`;
-      const transformed = transformCode(code, [protectedValue]);
+    it("should obfuscate large strings without exceeding runtime argument limits", () => {
+      const obfuscatedValue = "x".repeat(150_000);
+      const code = `const result = ${JSON.stringify(obfuscatedValue)};`;
+      const transformed = transformCode(code, [obfuscatedValue]);
 
       expect(transformed).not.toBeNull();
       const result = new Function(`${transformed!.code}; return result;`)();
-      expect(result).toBe(protectedValue);
+      expect(result).toBe(obfuscatedValue);
     });
 
     it("should generate correct character codes", () => {
@@ -121,73 +121,73 @@ describe("String Protection Transform", () => {
     it.each([
       [
         "object method",
-        'const value = { "MY_SECRET_KEY"() { return "ok"; } };',
+        'const value = { "OBFUSCATED_VALUE"() { return "ok"; } };',
       ],
       [
         "class method",
-        'const value = class { "MY_SECRET_KEY"() { return "ok"; } };',
+        'const value = class { "OBFUSCATED_VALUE"() { return "ok"; } };',
       ],
       [
         "class field",
-        'const value = class { "MY_SECRET_KEY" = "ok"; };',
+        'const value = class { "OBFUSCATED_VALUE" = "ok"; };',
       ],
       [
         "object getter",
-        'const value = { get "MY_SECRET_KEY"() { return "ok"; } };',
+        'const value = { get "OBFUSCATED_VALUE"() { return "ok"; } };',
       ],
       [
         "object setter",
-        'const value = { set "MY_SECRET_KEY"(next) {} };',
+        'const value = { set "OBFUSCATED_VALUE"(next) {} };',
       ],
       [
         "class getter",
-        'const value = class { get "MY_SECRET_KEY"() { return "ok"; } };',
+        'const value = class { get "OBFUSCATED_VALUE"() { return "ok"; } };',
       ],
       [
         "class setter",
-        'const value = class { set "MY_SECRET_KEY"(next) {} };',
+        'const value = class { set "OBFUSCATED_VALUE"(next) {} };',
       ],
       [
         "static class method",
-        'const value = class { static "MY_SECRET_KEY"() { return "ok"; } };',
+        'const value = class { static "OBFUSCATED_VALUE"() { return "ok"; } };',
       ],
       [
         "static class field",
-        'const value = class { static "MY_SECRET_KEY" = "ok"; };',
+        'const value = class { static "OBFUSCATED_VALUE" = "ok"; };',
       ],
-    ])("should preserve protected %s keys", (_kind, code) => {
-      const transformed = transformCode(code, ["MY_SECRET_KEY"]);
+    ])("should preserve matching %s keys", (_kind, code) => {
+      const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(transformed).not.toBeNull();
-      expect(transformed!.code).toContain('"MY_SECRET_KEY"');
+      expect(transformed!.code).toContain('"OBFUSCATED_VALUE"');
     });
 
-    it("should protect strings when String is shadowed", () => {
+    it("should obfuscate strings when String is shadowed", () => {
       const code = `
         function read(String) {
-          return "MY_SECRET_KEY";
+          return "OBFUSCATED_VALUE";
         }
         const result = read({});
       `;
-      const transformed = transformCode(code, ["MY_SECRET_KEY"]);
+      const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(transformed).not.toBeNull();
       const result = new Function(`${transformed!.code}; return result;`)();
-      expect(result).toBe("MY_SECRET_KEY");
+      expect(result).toBe("OBFUSCATED_VALUE");
     });
 
     it.each([
       [
         "hoisted var binding",
         `
-          var result = "MY_SECRET_KEY";
+          var result = "OBFUSCATED_VALUE";
           var String = {};
         `,
       ],
       [
         "lexical temporal dead zone",
         `
-          const result = "MY_SECRET_KEY";
+          const result = "OBFUSCATED_VALUE";
           const String = {};
         `,
       ],
@@ -198,7 +198,7 @@ describe("String Protection Transform", () => {
           try {
             throw {};
           } catch (String) {
-            result = "MY_SECRET_KEY";
+            result = "OBFUSCATED_VALUE";
           }
         `,
       ],
@@ -206,17 +206,17 @@ describe("String Protection Transform", () => {
         "class name binding",
         `
           class String {
-            value = "MY_SECRET_KEY";
+            value = "OBFUSCATED_VALUE";
           }
           const result = new String().value;
         `,
       ],
-    ])("should protect strings with a %s named String", (_kind, code) => {
-      const transformed = transformCode(code, ["MY_SECRET_KEY"]);
+    ])("should obfuscate strings with a %s named String", (_kind, code) => {
+      const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(transformed).not.toBeNull();
       const result = new Function(`${transformed!.code}; return result;`)();
-      expect(result).toBe("MY_SECRET_KEY");
+      expect(result).toBe("OBFUSCATED_VALUE");
     });
 
     it("should not depend on mutable String.fromCharCode", () => {
@@ -225,14 +225,14 @@ describe("String Protection Transform", () => {
         String.fromCharCode = function () {
           return "tampered";
         };
-        const result = "MY_SECRET_KEY";
+        const result = "OBFUSCATED_VALUE";
         String.fromCharCode = originalFromCharCode;
       `;
-      const transformed = transformCode(code, ["MY_SECRET_KEY"]);
+      const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(transformed).not.toBeNull();
       const result = new Function(`${transformed!.code}; return result;`)();
-      expect(result).toBe("MY_SECRET_KEY");
+      expect(result).toBe("OBFUSCATED_VALUE");
     });
 
     it("should transform template literals with expressions", () => {
@@ -255,12 +255,12 @@ describe("String Protection Transform", () => {
       );
     });
 
-    it("should preserve protected static tagged template literals", () => {
-      const code = "const query = sql`MY_SECRET_KEY`;";
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+    it("should preserve matching static tagged template literals", () => {
+      const code = "const query = sql`OBFUSCATED_VALUE`;";
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
-      expect(result!.code).toContain("sql`MY_SECRET_KEY`");
+      expect(result!.code).toContain("sql`OBFUSCATED_VALUE`");
       expect(result!.code).not.toContain("String.fromCharCode");
     });
 
@@ -503,16 +503,16 @@ describe("String Protection Transform", () => {
     });
 
     it("should include source maps when requested", () => {
-      const code = 'const secret = "MY_SECRET_KEY";';
-      const result = transformCode(code, ["MY_SECRET_KEY"], true);
+      const code = 'const marker = "OBFUSCATED_VALUE";';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"], true);
 
       expect(result).not.toBeNull();
       expect(result!.map).toBeDefined();
     });
 
     it("should not include source maps by default", () => {
-      const code = 'const secret = "MY_SECRET_KEY";';
-      const result = transformCode(code, ["MY_SECRET_KEY"]);
+      const code = 'const marker = "OBFUSCATED_VALUE";';
+      const result = transformCode(code, ["OBFUSCATED_VALUE"]);
 
       expect(result).not.toBeNull();
       expect(result!.map).toBeUndefined();
