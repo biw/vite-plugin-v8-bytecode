@@ -16,6 +16,7 @@ import { rewriteRequireSpecifiers, transformCode } from "./transforms";
 import { toRelativePath, resolveBuildOutputs, normalizePath } from "./utils";
 
 const bytecodeChunkExtensionRE = /\.(jsc|cjsc)$/;
+const electronViteRendererPluginPrefix = "vite:electron-renderer-";
 
 interface CommonBytecodeOptions {
   /**
@@ -115,7 +116,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
 
       // Check if used in renderer (not supported)
       const useInRenderer = config.plugins.some(
-        (p) => p.name === "vite:electron-renderer-preset-config"
+        (plugin) => plugin.name.startsWith(electronViteRendererPluginPrefix)
       );
       if (useInRenderer) {
         config.logger.warn("bytecodePlugin does not support renderer.");
