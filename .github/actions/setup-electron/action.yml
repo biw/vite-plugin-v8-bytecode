@@ -9,6 +9,12 @@ inputs:
     description: Node.js version to install.
     required: false
     default: 24.x
+  node-version-file:
+    description: >-
+      File containing the Node.js version to install. When set, this takes
+      precedence over node-version.
+    required: false
+    default: ""
   electron-version:
     description: >-
       Electron version to install over the lockfile entry. Leave empty to test
@@ -25,9 +31,16 @@ runs:
         cache: true
 
     - name: Setup Node.js
+      if: inputs.node-version-file == ''
       uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.node-version }}
+
+    - name: Setup Node.js from version file
+      if: inputs.node-version-file != ''
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: ${{ inputs.node-version-file }}
 
     - name: Install dependencies
       shell: bash
