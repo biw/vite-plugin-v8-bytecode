@@ -37,3 +37,6 @@ pnpm-debug.log*
 *.tmp
 .cache
 .context
+
+# Conductor
+.conductor/settings.local.toml

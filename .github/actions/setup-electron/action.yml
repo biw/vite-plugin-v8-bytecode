@@ -1,0 +1,98 @@
+name: Setup Electron test environment
+description: >-
+  Installs dependencies, optionally pins an Electron version, and prepares
+  whatever the host needs to run an Electron main process. Shared by every
+  workflow so the setup cannot drift between them.
+
+inputs:
+  node-version:
+    description: Node.js version to install.
+    required: false
+    default: 24.x
+  node-version-file:
+    description: >-
+      File containing the Node.js version to install. When set, this takes
+      precedence over node-version.
+    required: false
+    default: ""
+  electron-version:
+    description: >-
+      Electron version to install over the lockfile entry. Leave empty to test
+      the version the lockfile already pins.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        cache: true
+
+    - name: Setup Node.js
+      if: inputs.node-version-file == ''
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup Node.js from version file
+      if: inputs.node-version-file != ''
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: ${{ inputs.node-version-file }}
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Pin Electron ${{ inputs.electron-version }}
+      if: inputs.electron-version != ''
+      shell: bash
+      run: pnpm add --save-dev electron@${{ inputs.electron-version }}
+
+    # Separate from the sandbox step below because every platform needs the
+    # binary on disk, and the first require("electron") is what fetches it.
+    - name: Download Electron binary
+      shell: bash
+      run: node -e 'require("electron")'
+
+    # Linux only. macOS and Windows have no chrome-sandbox binary and no
+    # headless display to arrange.
+    - name: Configure Electron sandbox
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo chown root:root node_modules/electron/dist/chrome-sandbox
+        sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+    - name: Install virtual display
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+    # Exported so workflows can stay platform agnostic: on Linux this expands
+    # to the xvfb wrapper, and everywhere else to nothing.
+    - name: Export Electron launch prefix
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          echo "ELECTRON_LAUNCH_PREFIX=xvfb-run --auto-servernum" >> "$GITHUB_ENV"
+        else
+          echo "ELECTRON_LAUNCH_PREFIX=" >> "$GITHUB_ENV"
+        fi
+
+    # Reported from a real main process. Node mode initializes V8 differently
+    # from the runtime the plugin targets, so it is never used here.
+    - name: Report runtime versions
+      shell: bash
+      run: |
+        probe="$(mktemp -d)"
+        cat > "$probe/main.cjs" <<'PROBE'
+        const { app } = require("electron");
+        console.log(JSON.stringify(process.versions, null, 2));
+        app.exit(0);
+        PROBE
+        echo '{"main":"main.cjs","name":"probe","private":true}' > "$probe/package.json"
+        $ELECTRON_LAUNCH_PREFIX "$(node -p 'require("electron")' | tail -1)" \
+          --user-data-dir="$probe/user-data" "$probe"

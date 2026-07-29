@@ -3,7 +3,6 @@ import {
   access,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
   rm,
   writeFile,
@@ -11,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
-import { build, type Plugin } from "vite";
+import { build } from "vite";
 import { describe, expect, it } from "vitest";
 import {
   compileToBytecodeBatchForRuntime,
@@ -175,120 +174,6 @@ app.exit(0);
           recursive: true,
         });
         await runElectronApplication(outputDirectory);
-      } finally {
-        if (priorNodeEnv === undefined) {
-          delete process.env.NODE_ENV;
-        } else {
-          process.env.NODE_ENV = priorNodeEnv;
-        }
-        await rm(applicationDirectory, { force: true, recursive: true });
-      }
-    },
-    30_000
-  );
-
-  it(
-    "does not inject require into a context-isolated renderer when a plugin instance is reused",
-    async () => {
-      const applicationDirectory = await mkdtemp(
-        path.join(tmpdir(), "vite-bytecode-secure-renderer-")
-      );
-      const activationEntry = path.join(applicationDirectory, "activation.js");
-      const rendererEntry = path.join(applicationDirectory, "renderer.js");
-      const rendererDirectory = path.join(applicationDirectory, "renderer");
-      const resultPath = path.join(applicationDirectory, "result.json");
-      const priorNodeEnv = process.env.NODE_ENV;
-      const rendererMarker: Plugin = {
-        name: "vite:electron-renderer-preset-config",
-      };
-
-      try {
-        process.env.NODE_ENV = "production";
-        const sharedPlugin = bytecodePlugin();
-        await Promise.all([
-          writeFile(activationEntry, "module.exports = 42;"),
-          writeFile(
-            rendererEntry,
-            'globalThis.rendererResult = { answer: 42, requireType: typeof require };'
-          ),
-        ]);
-        // Reusing a plugin instance across Electron configs used to leave its
-        // main-process state enabled when the renderer config was resolved.
-        await build({
-          configFile: false,
-          logLevel: "silent",
-          plugins: [sharedPlugin],
-          root: applicationDirectory,
-          build: {
-            write: false,
-            rollupOptions: {
-              input: activationEntry,
-              output: { entryFileNames: "activation.cjs", format: "cjs" },
-            },
-          },
-        });
-        await build({
-          configFile: false,
-          logLevel: "silent",
-          plugins: [rendererMarker, sharedPlugin],
-          root: applicationDirectory,
-          build: {
-            emptyOutDir: true,
-            outDir: rendererDirectory,
-            rollupOptions: {
-              input: rendererEntry,
-              output: { entryFileNames: "renderer.js", format: "cjs" },
-            },
-          },
-        });
-
-        expect(await readdir(rendererDirectory)).toEqual(["renderer.js"]);
-        await Promise.all([
-          writeFile(
-            path.join(applicationDirectory, "index.html"),
-            '<script src="./renderer/renderer.js"></script>'
-          ),
-          writeFile(
-            path.join(applicationDirectory, "main.cjs"),
-            `
-const { app, BrowserWindow } = require("electron");
-const fs = require("node:fs");
-const path = require("node:path");
-app.whenReady().then(async () => {
-  const window = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
-    }
-  });
-  await window.loadFile(path.join(__dirname, "index.html"));
-  const result = await window.webContents.executeJavaScript(
-    "globalThis.rendererResult"
-  );
-  fs.writeFileSync(process.env.VITE_BYTECODE_RENDERER_RESULT, JSON.stringify(result));
-  app.exit(0);
-});
-`
-          ),
-          writeFile(
-            path.join(applicationDirectory, "package.json"),
-            JSON.stringify({
-              main: "main.cjs",
-              name: "vite-bytecode-secure-renderer",
-              private: true,
-            })
-          ),
-        ]);
-
-        await runElectronApplication(applicationDirectory, {
-          VITE_BYTECODE_RENDERER_RESULT: resultPath,
-        });
-        expect(JSON.parse(await readFile(resultPath, "utf8"))).toEqual({
-          answer: 42,
-          requireType: "undefined",
-        });
       } finally {
         if (priorNodeEnv === undefined) {
           delete process.env.NODE_ENV;

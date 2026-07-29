@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileToBytecode } from "../src/compiler";
 import { getBytecodeLoaderCode } from "../src/loader";
-import { transformCode } from "../src/transforms";
 
 const fixtureDirectory = path.join(__dirname, "fixtures", "compatibility");
 const currentNodeMajor = Number.parseInt(process.versions.node, 10);
@@ -32,7 +31,7 @@ describe(`raw JavaScript compatibility fixtures on Node ${currentNodeMajor}`, ()
   });
 
   it.each(compatibleFixtures)(
-    "transforms, compiles, and executes %s as bytecode",
+    "compiles and executes %s as bytecode",
     (fixtureName) => {
       const temporaryDirectory = fs.mkdtempSync(
         path.join(os.tmpdir(), "vite-bytecode-compatibility-")
@@ -43,12 +42,10 @@ describe(`raw JavaScript compatibility fixtures on Node ${currentNodeMajor}`, ()
           path.join(fixtureDirectory, fixtureName),
           "utf8"
         );
-        const transformed = transformCode(rawSource, []);
-        expect(transformed).not.toBeNull();
 
         fs.writeFileSync(
           path.join(temporaryDirectory, "fixture.jsc"),
-          compileToBytecode(transformed!.code)
+          compileToBytecode(rawSource)
         );
         fs.writeFileSync(
           path.join(temporaryDirectory, "bytecode-loader.cjs"),

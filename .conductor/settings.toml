@@ -1,0 +1,14 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "zsh -c 'set -o pipefail; ./conductor-setup.sh 2>&1 | tee conductor-setup.log'"
+run_mode = "concurrent"
+
+[scripts.run.test]
+command = "pnpm test:watch"
+default = true
+icon = "test-tube"
+
+[scripts.run.checks]
+command = "zsh -c 'set -euo pipefail; pnpm lint; pnpm typecheck; pnpm build; pnpm test'"
+icon = "circle-check"

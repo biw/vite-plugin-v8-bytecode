@@ -61,24 +61,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          cache: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      # The default test suite includes real Electron launches, so publishing
+      # must use the same sandbox and virtual-display setup as CI.
+      - name: Setup environment
+        uses: ./.github/actions/setup-electron
         with:
           node-version-file: .nvmrc
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Lint
         run: pnpm lint
 
       - name: Test
-        run: pnpm test
+        shell: bash
+        run: $ELECTRON_LAUNCH_PREFIX pnpm test
 
       - name: Build
         run: pnpm build

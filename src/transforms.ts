@@ -1,388 +1,720 @@
-import * as babel from "@babel/core";
-import type { PluginObj, PluginPass } from "@babel/core";
-import MagicString from "magic-string";
-import type { SourceMapInput } from "rollup";
+import type { ParseAst, SourceMapInput } from "rollup";
 
-interface ProtectStringsPluginState extends PluginPass {
-  opts: { protectedStrings: Set<string> };
-}
+type JavaScriptNode = {
+  end: number;
+  start: number;
+  type: string;
+  [key: string]: unknown;
+};
 
+type ParentNode = {
+  key: string;
+  node: JavaScriptNode;
+};
+
+type SourceEdit = {
+  content: string;
+  end: number;
+  literalValue?: string;
+  mapToStart?: number;
+  start: number;
+};
+
+type MappingPoint = {
+  generatedColumn: number;
+  generatedLine: number;
+  originalColumn: number;
+  originalLine: number;
+};
+
+type Scope = {
+  bindings: Set<string>;
+  functionScope: boolean;
+  parent: Scope | null;
+};
+
+const BASE64_CHARACTERS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const CHAR_CODE_CHUNK_SIZE = 4096;
 
 /**
- * Babel plugin that protects specific strings by converting them to String.fromCharCode calls
- * This adds an extra layer of obfuscation on top of bytecode compilation
- */
-function protectStringsPlugin(
-  api: typeof babel
-): PluginObj<ProtectStringsPluginState> {
-  const { types: t } = api;
-
-  function createFromCharCodeFunction(
-    path: babel.NodePath,
-    value: string
-  ): babel.types.Expression {
-    const program = path.findParent((parent) => parent.isProgram());
-    if (!program?.isProgram()) {
-      throw path.buildCodeFrameError(
-        "Protected strings must be contained in a JavaScript program"
-      );
-    }
-
-    const helper = program.scope.generateUidIdentifier("fromCharCode");
-    const stringConstructor = program.scope.generateUidIdentifier("String");
-    const fromCharCode = program.scope.generateUidIdentifier("fromCharCode");
-    const characterCodes = program.scope.generateUidIdentifier("characterCodes");
-
-    // Capture the intrinsic before any user code can shadow or replace String.
-    // One capture is emitted per protected literal so the generated code still
-    // makes each protected value independently identifiable.
-    program.unshiftContainer(
-      "body",
-      t.variableDeclaration("const", [
-        t.variableDeclarator(
-          helper,
-          t.callExpression(
-            t.functionExpression(
-              null,
-              [stringConstructor, fromCharCode],
-              t.blockStatement([
-                t.returnStatement(
-                  t.functionExpression(
-                    null,
-                    [t.restElement(characterCodes)],
-                    t.blockStatement([
-                      t.returnStatement(
-                        t.callExpression(
-                          t.memberExpression(
-                            fromCharCode,
-                            t.identifier("apply")
-                          ),
-                          [stringConstructor, characterCodes]
-                        )
-                      ),
-                    ])
-                  )
-                ),
-              ])
-            ),
-            [
-              t.memberExpression(
-                t.identifier("globalThis"),
-                t.identifier("String")
-              ),
-              t.memberExpression(
-                t.memberExpression(
-                  t.identifier("globalThis"),
-                  t.identifier("String")
-                ),
-                t.identifier("fromCharCode")
-              ),
-            ]
-          )
-        ),
-      ])
-    );
-
-    const charCodes: number[] = [];
-    for (let index = 0; index < value.length; index++) {
-      charCodes.push(value.charCodeAt(index));
-    }
-
-    const calls: babel.types.CallExpression[] = [];
-    for (let index = 0; index < charCodes.length; index += CHAR_CODE_CHUNK_SIZE) {
-      calls.push(
-        t.callExpression(
-          t.cloneNode(helper),
-          charCodes
-            .slice(index, index + CHAR_CODE_CHUNK_SIZE)
-            .map((code) => t.numericLiteral(code))
-        )
-      );
-    }
-
-    if (calls.length === 0) {
-      return t.callExpression(t.cloneNode(helper), []);
-    }
-
-    return calls.slice(1).reduce<babel.types.Expression>(
-      (result, call) => t.binaryExpression("+", result, call),
-      calls[0]
-    );
-  }
-
-  function isNonComputedPropertyKey(path: babel.NodePath): boolean {
-    const parent = path.parentPath;
-    if (!parent) {
-      return false;
-    }
-
-    if (
-      parent.isObjectProperty() ||
-      parent.isObjectMethod() ||
-      parent.isClassMethod() ||
-      parent.isClassProperty() ||
-      parent.isClassAccessorProperty()
-    ) {
-      return parent.node.key === path.node && !parent.node.computed;
-    }
-
-    return false;
-  }
-
-  return {
-    name: "protect-strings-plugin",
-    visitor: {
-      StringLiteral(path, state) {
-        // Skip obj['property']
-        if (
-          path.parentPath.isMemberExpression({
-            property: path.node,
-            computed: true,
-          })
-        ) {
-          return;
-        }
-
-        // Skip object/class property, method, and accessor names.
-        if (isNonComputedPropertyKey(path)) {
-          return;
-        }
-
-        // Skip require('fs')
-        if (
-          path.parentPath.isCallExpression() &&
-          t.isIdentifier(path.parentPath.node.callee) &&
-          path.parentPath.node.callee.name === "require" &&
-          path.parentPath.node.arguments[0] === path.node
-        ) {
-          return;
-        }
-
-        // Only CommonJS is supported for Node.js 22+, import/export checks are ignored
-
-        const { value } = path.node;
-        if (state.opts.protectedStrings.has(value)) {
-          path.replaceWith(createFromCharCodeFunction(path, value));
-        }
-      },
-      TemplateLiteral(path, state) {
-        if (path.parentPath.isTaggedTemplateExpression({ quasi: path.node })) {
-          return;
-        }
-
-        // Must be a pure static template literal
-        // expressions must be empty (no ${variables})
-        // quasis must have only one element (meaning the entire string is a single static part)
-        if (path.node.expressions.length > 0 || path.node.quasis.length !== 1) {
-          return;
-        }
-
-        // Extract the cooked value of the template literal
-        const value = path.node.quasis[0].value.cooked;
-        if (value && state.opts.protectedStrings.has(value)) {
-          path.replaceWith(createFromCharCodeFunction(path, value));
-        }
-      },
-    },
-  };
-}
-
-/**
- * Babel plugin that converts untagged template literals to string concatenation.
- * Tagged templates must be preserved because their template object is observable.
- */
-function templateLiteralToConcatPlugin(api: typeof babel): PluginObj {
-  const { types: t } = api;
-
-  function captureConcat(path: babel.NodePath): babel.types.Identifier {
-    const program = path.findParent((parent) => parent.isProgram());
-    if (!program?.isProgram()) {
-      throw path.buildCodeFrameError(
-        "Template literals must be contained in a JavaScript program"
-      );
-    }
-
-    const helper = program.scope.generateUidIdentifier("concat");
-    program.unshiftContainer(
-      "body",
-      t.variableDeclaration("const", [
-        t.variableDeclarator(
-          helper,
-          t.memberExpression(
-            t.memberExpression(
-              t.memberExpression(
-                t.identifier("globalThis"),
-                t.identifier("String")
-              ),
-              t.identifier("prototype")
-            ),
-            t.identifier("concat")
-          )
-        ),
-      ])
-    );
-    return helper;
-  }
-
-  return {
-    name: "template-literal-to-concat",
-    visitor: {
-      TemplateLiteral(path) {
-        // A tag receives the template object and substitutions separately.
-        // Replacing its quasi would both invalidate the AST and change semantics.
-        if (path.parentPath.isTaggedTemplateExpression({ quasi: path.node })) {
-          return;
-        }
-
-        const { quasis, expressions } = path.node;
-        const concat = expressions.length > 0 ? captureConcat(path) : null;
-
-        // Use an own concat method backed by the captured intrinsic. This
-        // preserves template-literal coercion and evaluation order without
-        // consulting a possibly replaced String.prototype.concat at runtime.
-        let result: babel.types.Expression = t.stringLiteral(
-          quasis[0]?.value.cooked ?? ""
-        );
-
-        for (let i = 0; i < expressions.length; i++) {
-          const expr = expressions[i];
-          if (!t.isExpression(expr)) {
-            continue;
-          }
-
-          const nextQuasi = quasis[i + 1]?.value.cooked ?? "";
-          const boundConcat = t.callExpression(
-            t.memberExpression(t.cloneNode(concat!), t.identifier("bind")),
-            [result]
-          );
-          result = t.callExpression(
-            t.memberExpression(
-              t.objectExpression([
-                t.objectProperty(t.identifier("concat"), boundConcat),
-              ]),
-              t.identifier("concat")
-            ),
-            [expr, t.stringLiteral(nextQuasi)]
-          );
-        }
-
-        path.replaceWith(result);
-      },
-    },
-  };
-}
-
-/**
- * Transforms code using Babel with untagged template literal conversion and
- * optional string protection.
+ * Obfuscates selected literal values without bringing a second JavaScript
+ * parser into the build. Vite exposes Rollup's parser through the plugin
+ * context, so callers pass `this.parse`.
  */
 export function transformCode(
   code: string,
-  protectedStrings: string[],
-  sourceMaps: boolean = false
+  obfuscatedStrings: string[],
+  parse: ParseAst,
+  sourceMaps: boolean = false,
+  sourceFileName: string = "chunk.js"
 ): { code: string; map?: SourceMapInput } | null {
-  const plugins: babel.PluginItem[] = [
-    // Convert ordinary template literals while preserving tagged templates.
-    templateLiteralToConcatPlugin,
-  ];
-
-  // Add string protection if needed
-  if (protectedStrings.length > 0) {
-    plugins.push([
-      protectStringsPlugin,
-      { protectedStrings: new Set(protectedStrings) },
-    ]);
+  if (obfuscatedStrings.length === 0) {
+    return null;
   }
 
-  const result = babel.transformSync(code, {
-    plugins,
-    sourceMaps,
-    sourceType: "script",
-    parserOpts: {
-      allowReturnOutsideFunction: true,
-      allowNewTargetOutsideFunction: true,
-    },
-    configFile: false,
-    babelrc: false,
+  const ast = asJavaScriptNode(
+    parse(code, { allowReturnOutsideFunction: true })
+  );
+  const selectedValues = new Set(obfuscatedStrings);
+  const replacements: SourceEdit[] = [];
+  const identifiers = new Set<string>();
+
+  walkJavaScript(ast, null, (node, parent) => {
+    if (node.type === "Identifier" && typeof node.name === "string") {
+      identifiers.add(node.name);
+    }
+
+    const value = getEligibleStringValue(node, parent);
+    if (value === undefined || !selectedValues.has(value)) {
+      return;
+    }
+
+    replacements.push({
+      content: "",
+      end: node.end,
+      literalValue: value,
+      mapToStart: node.start,
+      start: node.start,
+    });
   });
 
-  return result
-    ? { code: result.code || "", map: result.map || undefined }
-    : null;
+  if (replacements.length === 0) {
+    return null;
+  }
+
+  const helperName = getUniqueIdentifier(
+    "_viteBytecodeFromCharCode",
+    identifiers
+  );
+  for (const replacement of replacements) {
+    const value = replacement.literalValue;
+    if (value === undefined) {
+      throw new Error("Unable to recover an obfuscated string literal");
+    }
+    replacement.content = createObfuscatedExpression(helperName, value);
+  }
+
+  const insertionPoint = getHelperInsertionPoint(ast, code);
+  replacements.push({
+    content:
+      `${insertionPoint === 0 ? "" : "\n"}` +
+      `const ${helperName} = globalThis.String.fromCharCode.bind(globalThis.String);\n`,
+    end: insertionPoint,
+    start: insertionPoint,
+  });
+
+  const transformed = applySourceEdits(code, replacements);
+  return {
+    code: transformed.code,
+    map: sourceMaps
+      ? createSourceMap(
+          sourceFileName,
+          code,
+          transformed.mappingPoints,
+          transformed.code
+        )
+      : undefined,
+  };
 }
 
+/**
+ * Rewrites string arguments in real, unshadowed `require()` calls.
+ */
 export function rewriteRequireSpecifiers(
   code: string,
-  replace: (specifier: string) => string | undefined
+  replace: (specifier: string) => string | undefined,
+  parse: ParseAst
 ): { code: string; rewritten: boolean } {
-  const replacements: Array<{ start: number; end: number; value: string }> = [];
+  if (!code.includes("require")) {
+    return { code, rewritten: false };
+  }
 
-  babel.transformSync(code, {
-    code: false,
-    ast: false,
-    sourceType: "script",
-    parserOpts: {
-      allowReturnOutsideFunction: true,
-      allowNewTargetOutsideFunction: true,
-    },
-    configFile: false,
-    babelrc: false,
-    plugins: [
-      () => ({
-        visitor: {
-          CallExpression(path: babel.NodePath<babel.types.CallExpression>) {
-            if (
-              !tIsUnboundRequire(path) ||
-              path.node.arguments.length !== 1 ||
-              !babel.types.isStringLiteral(path.node.arguments[0])
-            ) {
-              return;
-            }
+  const ast = asJavaScriptNode(
+    parse(code, { allowReturnOutsideFunction: true })
+  );
+  const scopeByNode = createScopes(ast);
+  const replacements: SourceEdit[] = [];
 
-            const argument = path.node.arguments[0];
-            const replacement = replace(argument.value);
-            if (
-              replacement === undefined ||
-              replacement === argument.value ||
-              argument.start == null ||
-              argument.end == null
-            ) {
-              return;
-            }
+  walkJavaScript(ast, null, (node) => {
+    if (node.type !== "CallExpression") {
+      return;
+    }
 
-            replacements.push({
-              start: argument.start,
-              end: argument.end,
-              value: replacement,
-            });
-          },
-        },
-      }),
-    ],
+    const callee = asJavaScriptNodeOrNull(node.callee);
+    const args = Array.isArray(node.arguments) ? node.arguments : [];
+    const argument = asJavaScriptNodeOrNull(args[0]);
+    const scope = scopeByNode.get(node);
+    if (
+      !callee ||
+      callee.type !== "Identifier" ||
+      callee.name !== "require" ||
+      args.length !== 1 ||
+      !argument ||
+      argument.type !== "Literal" ||
+      typeof argument.value !== "string" ||
+      !scope ||
+      hasBinding(scope, "require")
+    ) {
+      return;
+    }
+
+    const replacement = replace(argument.value);
+    if (replacement === undefined || replacement === argument.value) {
+      return;
+    }
+
+    replacements.push({
+      content: JSON.stringify(replacement),
+      end: argument.end,
+      start: argument.start,
+    });
   });
 
   if (replacements.length === 0) {
     return { code, rewritten: false };
   }
 
-  const rewrittenCode = new MagicString(code);
-  for (const replacement of replacements) {
-    rewrittenCode.overwrite(
-      replacement.start,
-      replacement.end,
-      JSON.stringify(replacement.value)
+  return {
+    code: applySourceEdits(code, replacements).code,
+    rewritten: true,
+  };
+}
+
+function getEligibleStringValue(
+  node: JavaScriptNode,
+  parent: ParentNode | null
+): string | undefined {
+  if (node.type === "Literal" && typeof node.value === "string") {
+    if (!parent || shouldPreserveStringLiteral(node, parent)) {
+      return undefined;
+    }
+    return node.value;
+  }
+
+  if (
+    node.type !== "TemplateLiteral" ||
+    !Array.isArray(node.expressions) ||
+    node.expressions.length !== 0 ||
+    !Array.isArray(node.quasis) ||
+    node.quasis.length !== 1 ||
+    (parent?.node.type === "TaggedTemplateExpression" &&
+      parent.key === "quasi")
+  ) {
+    return undefined;
+  }
+
+  const quasi = asJavaScriptNodeOrNull(node.quasis[0]);
+  const value = quasi?.value;
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const cooked = (value as { cooked?: unknown }).cooked;
+  return typeof cooked === "string" ? cooked : undefined;
+}
+
+function shouldPreserveStringLiteral(
+  node: JavaScriptNode,
+  parent: ParentNode
+): boolean {
+  const parentNode = parent.node;
+
+  if (
+    parentNode.type === "ExpressionStatement" &&
+    parent.key === "expression" &&
+    typeof parentNode.directive === "string"
+  ) {
+    return true;
+  }
+
+  if (
+    parent.key === "key" &&
+    parentNode.computed === false &&
+    (parentNode.type === "Property" ||
+      parentNode.type === "MethodDefinition" ||
+      parentNode.type === "PropertyDefinition" ||
+      parentNode.type === "AccessorProperty")
+  ) {
+    return true;
+  }
+
+  if (
+    parentNode.type === "MemberExpression" &&
+    parent.key === "property" &&
+    parentNode.computed === true
+  ) {
+    return true;
+  }
+
+  if (
+    (parentNode.type === "ImportDeclaration" ||
+      parentNode.type === "ImportExpression" ||
+      parentNode.type === "ExportAllDeclaration" ||
+      parentNode.type === "ExportNamedDeclaration") &&
+    parent.key === "source"
+  ) {
+    return true;
+  }
+
+  if (parentNode.type === "CallExpression" && parent.key === "arguments") {
+    const callee = asJavaScriptNodeOrNull(parentNode.callee);
+    const args = Array.isArray(parentNode.arguments)
+      ? parentNode.arguments
+      : [];
+    if (args[0] !== node || !callee) {
+      return false;
+    }
+    if (callee.type === "Identifier" && callee.name === "require") {
+      return true;
+    }
+    if (callee.type === "MemberExpression") {
+      const object = asJavaScriptNodeOrNull(callee.object);
+      const property = asJavaScriptNodeOrNull(callee.property);
+      return (
+        object?.type === "Identifier" &&
+        object.name === "require" &&
+        property?.type === "Identifier" &&
+        property.name === "resolve"
+      );
+    }
+  }
+
+  return false;
+}
+
+function createObfuscatedExpression(
+  helperName: string,
+  value: string
+): string {
+  const characterCodes: number[] = [];
+  for (let index = 0; index < value.length; index++) {
+    characterCodes.push(value.charCodeAt(index));
+  }
+
+  const calls: string[] = [];
+  for (
+    let index = 0;
+    index < characterCodes.length;
+    index += CHAR_CODE_CHUNK_SIZE
+  ) {
+    calls.push(
+      `${helperName}(${characterCodes
+        .slice(index, index + CHAR_CODE_CHUNK_SIZE)
+        .join(",")})`
     );
   }
 
-  return { code: rewrittenCode.toString(), rewritten: true };
+  if (calls.length === 0) {
+    calls.push(`${helperName}()`);
+  }
+
+  return `(${calls.join(" + ")})`;
 }
 
-function tIsUnboundRequire(
-  path: babel.NodePath<babel.types.CallExpression>
-): boolean {
-  return (
-    babel.types.isIdentifier(path.node.callee, { name: "require" }) &&
-    !path.scope.hasBinding("require")
+function getUniqueIdentifier(base: string, identifiers: Set<string>): string {
+  if (!identifiers.has(base)) {
+    return base;
+  }
+
+  let suffix = 1;
+  while (identifiers.has(`${base}$${String(suffix)}`)) {
+    suffix++;
+  }
+  return `${base}$${String(suffix)}`;
+}
+
+function getHelperInsertionPoint(ast: JavaScriptNode, code: string): number {
+  const hashbangEnd = code.startsWith("#!") ? code.indexOf("\n") : -1;
+  let insertionPoint =
+    hashbangEnd === -1
+      ? code.startsWith("#!")
+        ? code.length
+        : 0
+      : hashbangEnd + 1;
+  const body = Array.isArray(ast.body) ? ast.body : [];
+
+  for (const value of body) {
+    const statement = asJavaScriptNodeOrNull(value);
+    if (
+      !statement ||
+      statement.type !== "ExpressionStatement" ||
+      typeof statement.directive !== "string"
+    ) {
+      break;
+    }
+    insertionPoint = statement.end;
+  }
+
+  return insertionPoint;
+}
+
+function applySourceEdits(
+  code: string,
+  edits: SourceEdit[]
+): { code: string; mappingPoints: MappingPoint[] } {
+  const orderedEdits = [...edits].sort(
+    (left, right) => left.start - right.start || left.end - right.end
   );
+  const lineStarts = getLineStarts(code);
+  const mappingPoints: MappingPoint[] = [];
+  let cursor = 0;
+  let generatedCode = "";
+  let generatedLine = 0;
+  let generatedColumn = 0;
+
+  const append = (content: string): void => {
+    generatedCode += content;
+    const lines = content.split("\n");
+    if (lines.length === 1) {
+      generatedColumn += content.length;
+    } else {
+      generatedLine += lines.length - 1;
+      generatedColumn = lines.at(-1)?.length ?? 0;
+    }
+  };
+
+  const appendOriginal = (start: number, end: number): void => {
+    if (start >= end) {
+      return;
+    }
+
+    let sourceOffset = start;
+    let segmentStart = start;
+    while (segmentStart < end) {
+      const newline = code.indexOf("\n", segmentStart);
+      const segmentEnd = newline === -1 || newline >= end ? end : newline + 1;
+      const original = getLineAndColumn(lineStarts, sourceOffset);
+      mappingPoints.push({
+        generatedColumn,
+        generatedLine,
+        originalColumn: original.column,
+        originalLine: original.line,
+      });
+      append(code.slice(segmentStart, segmentEnd));
+      sourceOffset = segmentEnd;
+      segmentStart = segmentEnd;
+    }
+  };
+
+  for (const edit of orderedEdits) {
+    if (
+      edit.start < cursor ||
+      edit.end < edit.start ||
+      edit.end > code.length
+    ) {
+      throw new Error("Overlapping or invalid JavaScript source edits");
+    }
+
+    appendOriginal(cursor, edit.start);
+    if (edit.mapToStart !== undefined) {
+      const original = getLineAndColumn(lineStarts, edit.mapToStart);
+      mappingPoints.push({
+        generatedColumn,
+        generatedLine,
+        originalColumn: original.column,
+        originalLine: original.line,
+      });
+    }
+    append(edit.content);
+    cursor = edit.end;
+  }
+
+  appendOriginal(cursor, code.length);
+  return { code: generatedCode, mappingPoints };
+}
+
+function createSourceMap(
+  sourceFileName: string,
+  source: string,
+  mappingPoints: MappingPoint[],
+  generatedCode: string
+): SourceMapInput {
+  const generatedLineCount = generatedCode.split("\n").length;
+  const pointsByLine = new Map<number, MappingPoint[]>();
+  for (const point of mappingPoints) {
+    const points = pointsByLine.get(point.generatedLine) ?? [];
+    points.push(point);
+    pointsByLine.set(point.generatedLine, points);
+  }
+
+  let previousSource = 0;
+  let previousOriginalLine = 0;
+  let previousOriginalColumn = 0;
+  const mappingLines: string[] = [];
+
+  for (let line = 0; line < generatedLineCount; line++) {
+    const points = (pointsByLine.get(line) ?? []).sort(
+      (left, right) => left.generatedColumn - right.generatedColumn
+    );
+    let previousGeneratedColumn = 0;
+    let previousPointColumn = -1;
+    const segments: string[] = [];
+
+    for (const point of points) {
+      if (point.generatedColumn === previousPointColumn) {
+        continue;
+      }
+      const segment = [
+        point.generatedColumn - previousGeneratedColumn,
+        -previousSource,
+        point.originalLine - previousOriginalLine,
+        point.originalColumn - previousOriginalColumn,
+      ];
+      segments.push(segment.map(encodeVlq).join(""));
+      previousGeneratedColumn = point.generatedColumn;
+      previousSource = 0;
+      previousOriginalLine = point.originalLine;
+      previousOriginalColumn = point.originalColumn;
+      previousPointColumn = point.generatedColumn;
+    }
+
+    mappingLines.push(segments.join(","));
+  }
+
+  return {
+    mappings: mappingLines.join(";"),
+    names: [],
+    sources: [sourceFileName],
+    sourcesContent: [source],
+    version: 3,
+  };
+}
+
+function encodeVlq(value: number): string {
+  let encoded = "";
+  let vlq = value < 0 ? ((-value) << 1) | 1 : value << 1;
+
+  do {
+    let digit = vlq & 31;
+    vlq >>>= 5;
+    if (vlq > 0) {
+      digit |= 32;
+    }
+    encoded += BASE64_CHARACTERS[digit];
+  } while (vlq > 0);
+
+  return encoded;
+}
+
+function getLineStarts(code: string): number[] {
+  const lineStarts = [0];
+  for (let index = 0; index < code.length; index++) {
+    if (code[index] === "\n") {
+      lineStarts.push(index + 1);
+    }
+  }
+  return lineStarts;
+}
+
+function getLineAndColumn(
+  lineStarts: number[],
+  offset: number
+): { column: number; line: number } {
+  let low = 0;
+  let high = lineStarts.length;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (lineStarts[middle] <= offset) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return { column: offset - lineStarts[low], line: low };
+}
+
+function createScopes(ast: JavaScriptNode): WeakMap<JavaScriptNode, Scope> {
+  const scopeByNode = new WeakMap<JavaScriptNode, Scope>();
+
+  const visit = (node: JavaScriptNode, incomingScope: Scope | null): void => {
+    let scope = incomingScope;
+
+    if (node.type === "Program") {
+      scope = createScope(null, true);
+    } else {
+      if (
+        (node.type === "FunctionDeclaration" ||
+          node.type === "ClassDeclaration") &&
+        scope
+      ) {
+        addPatternBindings(node.id, scope.bindings);
+      }
+
+      if (isFunctionNode(node)) {
+        scope = createScope(scope, true);
+        if (node.type === "FunctionExpression") {
+          addPatternBindings(node.id, scope.bindings);
+        }
+        if (Array.isArray(node.params)) {
+          for (const parameter of node.params) {
+            addPatternBindings(parameter, scope.bindings);
+          }
+        }
+      } else if (
+        node.type === "ClassDeclaration" ||
+        node.type === "ClassExpression"
+      ) {
+        scope = createScope(scope, false);
+        addPatternBindings(node.id, scope.bindings);
+      } else if (
+        node.type === "BlockStatement" ||
+        node.type === "CatchClause" ||
+        node.type === "ForStatement" ||
+        node.type === "ForInStatement" ||
+        node.type === "ForOfStatement" ||
+        node.type === "StaticBlock" ||
+        node.type === "SwitchStatement"
+      ) {
+        scope = createScope(scope, false);
+        if (node.type === "CatchClause") {
+          addPatternBindings(node.param, scope.bindings);
+        }
+      }
+    }
+
+    if (!scope) {
+      throw new Error("JavaScript AST does not contain a Program scope");
+    }
+    scopeByNode.set(node, scope);
+
+    if (node.type === "VariableDeclaration") {
+      const declarationScope =
+        node.kind === "var" ? getFunctionScope(scope) : scope;
+      if (Array.isArray(node.declarations)) {
+        for (const value of node.declarations) {
+          const declaration = asJavaScriptNodeOrNull(value);
+          addPatternBindings(declaration?.id, declarationScope.bindings);
+        }
+      }
+    } else if (node.type === "ImportDeclaration") {
+      if (Array.isArray(node.specifiers)) {
+        for (const value of node.specifiers) {
+          const specifier = asJavaScriptNodeOrNull(value);
+          addPatternBindings(specifier?.local, scope.bindings);
+        }
+      }
+    }
+
+    forEachChildNode(node, (child) => visit(child, scope));
+  };
+
+  visit(ast, null);
+  return scopeByNode;
+}
+
+function createScope(parent: Scope | null, functionScope: boolean): Scope {
+  return { bindings: new Set(), functionScope, parent };
+}
+
+function getFunctionScope(scope: Scope): Scope {
+  let current = scope;
+  while (!current.functionScope && current.parent) {
+    current = current.parent;
+  }
+  return current;
+}
+
+function hasBinding(scope: Scope, name: string): boolean {
+  let current: Scope | null = scope;
+  while (current) {
+    if (current.bindings.has(name)) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isFunctionNode(node: JavaScriptNode): boolean {
+  return (
+    node.type === "FunctionDeclaration" ||
+    node.type === "FunctionExpression" ||
+    node.type === "ArrowFunctionExpression"
+  );
+}
+
+function addPatternBindings(value: unknown, bindings: Set<string>): void {
+  const node = asJavaScriptNodeOrNull(value);
+  if (!node) {
+    return;
+  }
+
+  if (node.type === "Identifier" && typeof node.name === "string") {
+    bindings.add(node.name);
+    return;
+  }
+
+  if (node.type === "RestElement") {
+    addPatternBindings(node.argument, bindings);
+  } else if (node.type === "AssignmentPattern") {
+    addPatternBindings(node.left, bindings);
+  } else if (node.type === "ArrayPattern" && Array.isArray(node.elements)) {
+    for (const element of node.elements) {
+      addPatternBindings(element, bindings);
+    }
+  } else if (node.type === "ObjectPattern" && Array.isArray(node.properties)) {
+    for (const value of node.properties) {
+      const property = asJavaScriptNodeOrNull(value);
+      if (property?.type === "RestElement") {
+        addPatternBindings(property.argument, bindings);
+      } else {
+        addPatternBindings(property?.value, bindings);
+      }
+    }
+  }
+}
+
+function walkJavaScript(
+  node: JavaScriptNode,
+  parent: ParentNode | null,
+  visit: (node: JavaScriptNode, parent: ParentNode | null) => void
+): void {
+  visit(node, parent);
+  forEachChildNode(node, (child, key) => {
+    walkJavaScript(child, { key, node }, visit);
+  });
+}
+
+function forEachChildNode(
+  node: JavaScriptNode,
+  visit: (node: JavaScriptNode, key: string) => void
+): void {
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "start" || key === "end" || key === "type") {
+      continue;
+    }
+
+    const child = asJavaScriptNodeOrNull(value);
+    if (child) {
+      visit(child, key);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        const arrayChild = asJavaScriptNodeOrNull(item);
+        if (arrayChild) {
+          visit(arrayChild, key);
+        }
+      }
+    }
+  }
+}
+
+function asJavaScriptNode(value: unknown): JavaScriptNode {
+  const node = asJavaScriptNodeOrNull(value);
+  if (!node) {
+    throw new Error("Expected a JavaScript AST node");
+  }
+  return node;
+}
+
+function asJavaScriptNodeOrNull(value: unknown): JavaScriptNode | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    typeof (value as { type?: unknown }).type !== "string" ||
+    typeof (value as { start?: unknown }).start !== "number" ||
+    typeof (value as { end?: unknown }).end !== "number"
+  ) {
+    return null;
+  }
+  return value as JavaScriptNode;
 }
