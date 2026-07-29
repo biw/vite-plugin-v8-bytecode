@@ -1221,6 +1221,61 @@ describe("bytecodePlugin output formats", () => {
     );
   });
 
+  it("keeps obfuscated retained JavaScript executable with a valid source map", async () => {
+    const marker = "RETAINED_SOURCE_MAP_MARKER";
+    fs.writeFileSync(
+      path.join(fixtureDir, "entry.js"),
+      `export const marker = ${JSON.stringify(marker)};\n`
+    );
+
+    const buildResult = await build({
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        bytecodePlugin({
+          obfuscatedStrings: [marker],
+          removeBundleJS: false,
+        }),
+      ],
+      build: {
+        write: false,
+        sourcemap: true,
+        lib: {
+          entry: path.join(fixtureDir, "entry.js"),
+          name: "RegressionFixture",
+          fileName: () => "entry.cjs",
+          formats: ["cjs"],
+        },
+      },
+    });
+    const result = (
+      Array.isArray(buildResult) ? buildResult[0] : buildResult
+    ) as RollupOutput;
+    const retainedMap = result.output.find(
+      (file) => file.type === "asset" && file.fileName === "_entry.cjs.map"
+    );
+    const sourceMap =
+      retainedMap?.type === "asset"
+        ? JSON.parse(String(retainedMap.source))
+        : undefined;
+    const outputDirectory = writeOutput(result);
+    const exported = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["-e", 'process.stdout.write(JSON.stringify(require("./_entry.cjs")))'],
+        { cwd: outputDirectory, encoding: "utf8" }
+      )
+    );
+
+    expect(exported.marker).toBe(marker);
+    expect(sourceMap).toMatchObject({
+      file: "_entry.cjs",
+      version: 3,
+    });
+    expect(sourceMap.names).toEqual(expect.any(Array));
+    expect(sourceMap.mappings).not.toBe("");
+  });
+
   it("keeps a fully bytecoded split bundle executable as original JavaScript", async () => {
     const entryPath = path.join(fixtureDir, "retained-entry.js");
     const dependencyPath = path.join(fixtureDir, "retained-dependency.js");

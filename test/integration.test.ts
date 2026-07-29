@@ -4,7 +4,6 @@ import path from "node:path";
 import { execFileSync, execSync } from "node:child_process";
 import { compileToBytecode } from "../src/compiler";
 import { getBytecodeLoaderCode } from "../src/loader";
-import { transformCode } from "../src/transforms";
 import { LANGUAGE_CASES } from "./language-cases";
 
 describe("Integration Tests - Real-world Scenarios", () => {
@@ -21,14 +20,6 @@ describe("Integration Tests - Real-world Scenarios", () => {
 
   function writeBytecodeFixture(name: string, code: string): string {
     return writeTestFile(name, compileToBytecode(code));
-  }
-
-  function writeTransformedBytecodeFixture(name: string, code: string): string {
-    const transformed = transformCode(code, []);
-    if (!transformed) {
-      throw new Error("JavaScript transformation unexpectedly returned null");
-    }
-    return writeBytecodeFixture(name, transformed.code);
   }
 
   function installLoader(): string {
@@ -169,22 +160,20 @@ require("./arrow.jsc");
     }
   });
 
-  it("should execute transformed code (with template literals converted)", () => {
-    // Simulates code that went through Babel transformation
-    // (like what happens in Vite's renderChunk)
-    const transformedCode = `
+  it("should execute raw template literals from bytecode", () => {
+    const templateLiteralCode = `
 "use strict";
 function greet(name) {
-  return "Hello, " + name + "!";  // Was template literal, now concatenation
+  return \`Hello, \${name}!\`;
 }
-const message = (function(arr) { return String.fromCharCode(...arr); })([84,69,83,84]);
-console.log(greet("Transformed"));
-console.log("Protected:", message);
+const message = \`Template \${"literal"}\`;
+console.log(greet("Bytecode"));
+console.log(message);
 module.exports = { greet, message };
 `;
 
-    const bytecode = compileToBytecode(transformedCode);
-    const bytecodeFile = path.join(testDir, "transformed.jsc");
+    const bytecode = compileToBytecode(templateLiteralCode);
+    const bytecodeFile = path.join(testDir, "template-literal.jsc");
     fs.writeFileSync(bytecodeFile, bytecode);
     testFiles.push(bytecodeFile);
 
@@ -196,10 +185,10 @@ module.exports = { greet, message };
     const entryCode = `
 "use strict";
 require("./bytecode-loader.cjs");
-const result = require("./transformed.jsc");
+const result = require("./template-literal.jsc");
 console.log("Message:", result.message);
 `;
-    const entryFile = path.join(testDir, "entry-transformed.cjs");
+    const entryFile = path.join(testDir, "entry-template-literal.cjs");
     fs.writeFileSync(entryFile, entryCode);
     testFiles.push(entryFile);
 
@@ -209,12 +198,11 @@ console.log("Message:", result.message);
         cwd: testDir,
       });
 
-      console.log("Transformed output:", output);
-      expect(output).toContain("Hello, Transformed!");
-      expect(output).toContain("Protected: TEST");
-      expect(output).toContain("Message: TEST");
+      expect(output).toContain("Hello, Bytecode!");
+      expect(output).toContain("Template literal");
+      expect(output).toContain("Message: Template literal");
     } catch (error: any) {
-      console.error("Transformed test failed:", error.message);
+      console.error("Template literal test failed:", error.message);
       console.error("Stdout:", error.stdout);
       console.error("Stderr:", error.stderr);
       throw error;
@@ -421,9 +409,9 @@ console.log("circular dependency preserved");
   });
 
   it.each(LANGUAGE_CASES)(
-    "preserves %s through transformed bytecode execution",
+    "preserves %s through raw bytecode execution",
     (_feature, moduleCode, expected) => {
-      writeTransformedBytecodeFixture("compatibility.jsc", moduleCode);
+      writeBytecodeFixture("compatibility.jsc", moduleCode);
       installLoader();
       const entryFile = writeTestFile(
         "compatibility.cjs",

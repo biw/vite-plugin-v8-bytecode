@@ -5,6 +5,7 @@ import type {
   OutputBundle,
   OutputChunk,
   OutputOptions,
+  ParseAst,
   SourceMapInput,
 } from "rollup";
 import {
@@ -238,8 +239,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       chunk,
       outputOptions
     ): { code: string; map?: SourceMapInput } | null {
-      // Transform ordinary template literals in CommonJS bytecode chunks.
-      // Tagged templates are preserved because rewriting them changes semantics.
+      // Obfuscate selected literals before Rollup finalizes chunk hashes.
       if (
         enabled &&
         outputOptions.format === "cjs" &&
@@ -249,7 +249,9 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         return transformCode(
           code,
           obfuscatedStrings,
-          !!outputOptions.sourcemap
+          this.parse,
+          !!outputOptions.sourcemap,
+          chunk.fileName
         );
       }
       return null;
@@ -385,7 +387,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
             chunk.code,
             chunk.fileName,
             retainedFileName,
-            retainedFileNames
+            retainedFileNames,
+            this.parse
           ).code;
           const sourceMapFileName = getSourceMapFileName(chunk);
 
@@ -425,7 +428,8 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           chunk.code,
           chunk.fileName,
           chunk.fileName,
-          bytecodeFileNames
+          bytecodeFileNames,
+          this.parse
         );
         rewrittenChunks.set(normalizedFileName, rewritten);
       }
@@ -535,26 +539,31 @@ function rewriteChunkRequires(
   code: string,
   originalCallerFileName: string,
   outputCallerFileName: string,
-  outputFileNames: ReadonlyMap<string, string>
+  outputFileNames: ReadonlyMap<string, string>,
+  parse: ParseAst
 ): { code: string; rewritten: boolean } {
-  return rewriteRequireSpecifiers(code, (specifier) => {
-    if (!specifier.startsWith(".")) {
-      return undefined;
-    }
+  return rewriteRequireSpecifiers(
+    code,
+    (specifier) => {
+      if (!specifier.startsWith(".")) {
+        return undefined;
+      }
 
-    const resolvedFileName = normalizePath(
-      path.posix.normalize(
-        path.posix.join(
-          path.posix.dirname(normalizePath(originalCallerFileName)),
-          specifier
+      const resolvedFileName = normalizePath(
+        path.posix.normalize(
+          path.posix.join(
+            path.posix.dirname(normalizePath(originalCallerFileName)),
+            specifier
+          )
         )
-      )
-    );
-    const outputFileName = outputFileNames.get(resolvedFileName);
-    return outputFileName
-      ? toRelativePath(outputFileName, normalizePath(outputCallerFileName))
-      : undefined;
-  });
+      );
+      const outputFileName = outputFileNames.get(resolvedFileName);
+      return outputFileName
+        ? toRelativePath(outputFileName, normalizePath(outputCallerFileName))
+        : undefined;
+    },
+    parse
+  );
 }
 
 function getShebang(code: string): string {

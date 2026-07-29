@@ -21,6 +21,8 @@ entry shims required to execute the result.
   basic plaintext scans.
 - **Unchanged development workflow:** Skip bytecode compilation outside
   production builds.
+- **No package dependencies:** Reuse Vite's parser instead of installing
+  separate parsing and source-editing libraries.
 
 ## Installation
 

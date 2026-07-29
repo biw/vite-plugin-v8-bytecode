@@ -9,7 +9,6 @@ import {
   resolveElectronPath,
 } from "../src/compiler";
 import { getBytecodeLoaderCode } from "../src/loader";
-import { transformCode } from "../src/transforms";
 import { LANGUAGE_CASES } from "./language-cases";
 
 /**
@@ -157,13 +156,7 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
     const userDataDirectory = path.join(directory, "user-data");
 
     try {
-      const sources = LANGUAGE_CASES.map(([feature, code]) => {
-        const transformed = transformCode(code, []);
-        if (!transformed) {
-          throw new Error(`Transform returned null for ${feature}`);
-        }
-        return transformed.code;
-      });
+      const sources = LANGUAGE_CASES.map(([, code]) => code);
 
       // One Electron process compiles the whole matrix.
       const bytecode = await compileToBytecodeBatchForRuntime(sources, {
