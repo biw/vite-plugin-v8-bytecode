@@ -1,5 +1,6 @@
 # vite-plugin-v8-bytecode
 
+[![CI](https://badgen.net/github/checks/biw/vite-plugin-v8-bytecode)](https://github.com/biw/vite-plugin-v8-bytecode/actions)
 [![npm version](https://badgen.net/npm/v/vite-plugin-v8-bytecode)](https://www.npmjs.com/package/vite-plugin-v8-bytecode)
 [![npm downloads](https://badgen.net/npm/dt/vite-plugin-v8-bytecode)](https://www.npmjs.com/package/vite-plugin-v8-bytecode)
 
