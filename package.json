@@ -2,51 +2,58 @@
   "name": "vite-plugin-v8-bytecode",
   "version": "1.0.0",
   "description": "A Vite plugin for compiling JavaScript to V8 bytecode for Node.js and Electron applications",
-  "author": "Ben Williams",
-  "license": "MIT",
+  "keywords": [
+    "electron",
+    "electron-vite",
+    "modules",
+    "native",
+    "native-addon",
+    "native-module",
+    "native-module-loader",
+    "node-gyp",
+    "plugin",
+    "vite"
+  ],
   "homepage": "https://github.com/biw/vite-plugin-v8-bytecode",
-  "packageManager": "pnpm@11.17.0",
+  "license": "MIT",
+  "author": "Ben Williams",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/biw/vite-plugin-v8-bytecode.git"
   },
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
-  },
   "files": [
     "dist"
   ],
-  "keywords": [
-    "vite",
-    "plugin",
-    "native",
-    "modules",
-    "node-gyp",
-    "native-module",
-    "native-addon",
-    "native-module-loader",
-    "electron",
-    "electron-vite"
-  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
   "scripts": {
-    "build": "tsup",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:electron": "vitest run test/electron-*.test.ts",
-    "test:packaged": "vitest run --config vitest.packaged.config.ts",
-    "test:watch": "vitest",
+    "build": "vp pack",
+    "lint": "vp lint .",
+    "test": "vp test run",
+    "test:electron": "vp test run test/electron-*.test.ts",
+    "test:packaged": "vp test run --config vitest.packaged.config.ts",
+    "test:watch": "vp test",
     "typecheck": "tsc --noEmit"
   },
-  "engines": {
-    "node": ">=22"
+  "devDependencies": {
+    "@electron/asar": "^4.2.1",
+    "@types/node": "22.18.0",
+    "electron": "^43.2.0",
+    "electron-vite": "5.0.0",
+    "rollup": "4.52.5",
+    "typescript": "5.9.3",
+    "vite": "catalog:",
+    "vite7": "npm:vite@7.2.1",
+    "vite-plus": "catalog:"
   },
   "peerDependencies": {
     "electron": ">=35.0.0",
@@ -57,19 +64,8 @@
       "optional": true
     }
   },
-  "devDependencies": {
-    "@electron/asar": "^4.2.1",
-    "@eslint/js": "^9.39.1",
-    "@types/node": "22.18.0",
-    "electron": "^43.2.0",
-    "electron-vite": "5.0.0",
-    "eslint": "9.39.1",
-    "globals": "14.0.0",
-    "rollup": "4.52.5",
-    "tsup": "8.5.0",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.46.3",
-    "vite": "7.2.1",
-    "vitest": "^4.0.7"
-  }
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.17.0"
 }

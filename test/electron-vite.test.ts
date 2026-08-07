@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { build } from "electron-vite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { resolveElectronPath } from "../src/compiler";
 import { bytecodePlugin } from "../src/index";
 

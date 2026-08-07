@@ -4,7 +4,10 @@
     "lib": ["es2022"],
     "moduleDetection": "force",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "paths": {
+      "vite": ["./node_modules/vite7"]
+    },
     "resolveJsonModule": true,
     "types": ["node"],
     "strict": true,

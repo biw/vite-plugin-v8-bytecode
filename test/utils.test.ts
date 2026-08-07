@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vite-plus/test";
 import {
   toRelativePath,
   normalizePath,

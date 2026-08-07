@@ -1,11 +1,5 @@
 import { spawn } from "node:child_process";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,9 +16,7 @@ export type ElectronBytecodeRuntimeOptions = {
   runtime: "electron";
 };
 
-export type BytecodeRuntimeOptions =
-  | ElectronBytecodeRuntimeOptions
-  | NodeBytecodeRuntimeOptions;
+export type BytecodeRuntimeOptions = ElectronBytecodeRuntimeOptions | NodeBytecodeRuntimeOptions;
 
 // Set V8 flags for eager compilation - MUST be done before any scripts are compiled
 // These flags ensure that all functions are compiled immediately, not lazily
@@ -123,10 +115,7 @@ try {
 }
 `;
 
-export function resolveElectronPath(
-  electronPath?: string,
-  resolutionBase = process.cwd()
-): string {
+export function resolveElectronPath(electronPath?: string, resolutionBase = process.cwd()): string {
   if (electronPath) {
     return path.resolve(resolutionBase, electronPath);
   }
@@ -137,15 +126,13 @@ export function resolveElectronPath(
     electronModulePath = projectRequire.resolve("electron");
   } catch {
     throw new Error(
-      "Unable to resolve Electron. Install Electron in the consuming project or pass electronPath."
+      "Unable to resolve Electron. Install Electron in the consuming project or pass electronPath.",
     );
   }
 
   const resolvedElectronPath: unknown = projectRequire(electronModulePath);
   if (typeof resolvedElectronPath !== "string") {
-    throw new Error(
-      `Electron module did not export an executable path: ${electronModulePath}`
-    );
+    throw new Error(`Electron module did not export an executable path: ${electronModulePath}`);
   }
 
   return resolvedElectronPath;
@@ -156,7 +143,7 @@ function runElectronCompiler(
   applicationDirectory: string,
   sourceDirectory: string,
   outputDirectory: string,
-  sourceCount: number
+  sourceCount: number,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const environment: NodeJS.ProcessEnv = {
@@ -167,9 +154,7 @@ function runElectronCompiler(
     };
     delete environment.ELECTRON_RUN_AS_NODE;
 
-    const args = [
-      `--user-data-dir=${path.join(applicationDirectory, "user-data")}`,
-    ];
+    const args = [`--user-data-dir=${path.join(applicationDirectory, "user-data")}`];
     if (process.platform === "linux" && process.getuid?.() === 0) {
       args.push("--no-sandbox");
     }
@@ -202,8 +187,8 @@ function runElectronCompiler(
           new Error(
             `Electron bytecode compiler exited with ${
               signal ?? `code ${String(exitCode)}`
-            }${details ? `: ${details}` : ""}`
-          )
+            }${details ? `: ${details}` : ""}`,
+          ),
         );
         return;
       }
@@ -217,16 +202,14 @@ function runElectronCompiler(
 async function compileToElectronBytecodeBatch(
   codes: string[],
   electronPath?: string,
-  resolutionBase?: string
+  resolutionBase?: string,
 ): Promise<Buffer[]> {
   if (codes.length === 0) {
     return [];
   }
 
   const executablePath = resolveElectronPath(electronPath, resolutionBase);
-  const applicationDirectory = await mkdtemp(
-    path.join(tmpdir(), "vite-plugin-v8-bytecode-")
-  );
+  const applicationDirectory = await mkdtemp(path.join(tmpdir(), "vite-plugin-v8-bytecode-"));
   const sourceDirectory = path.join(applicationDirectory, "source");
   const outputDirectory = path.join(applicationDirectory, "output");
 
@@ -240,17 +223,12 @@ async function compileToElectronBytecodeBatch(
           main: "compiler.cjs",
           name: "vite-plugin-v8-bytecode-compiler",
           private: true,
-        })
+        }),
       ),
-      writeFile(
-        path.join(applicationDirectory, "compiler.cjs"),
-        electronCompilerScript
-      ),
+      writeFile(path.join(applicationDirectory, "compiler.cjs"), electronCompilerScript),
     ]);
     await Promise.all(
-      codes.map((code, index) =>
-        writeFile(path.join(sourceDirectory, String(index)), code)
-      )
+      codes.map((code, index) => writeFile(path.join(sourceDirectory, String(index)), code)),
     );
 
     await runElectronCompiler(
@@ -258,11 +236,11 @@ async function compileToElectronBytecodeBatch(
       applicationDirectory,
       sourceDirectory,
       outputDirectory,
-      codes.length
+      codes.length,
     );
 
     const bytecode = await Promise.all(
-      codes.map((_, index) => readFile(path.join(outputDirectory, String(index))))
+      codes.map((_, index) => readFile(path.join(outputDirectory, String(index)))),
     );
     if (bytecode.some((buffer) => buffer.length === 0)) {
       throw new Error("Electron bytecode compiler produced an empty output");
@@ -278,13 +256,9 @@ async function compileToElectronBytecodeBatch(
 export async function compileToBytecodeForRuntime(
   code: string,
   options: BytecodeRuntimeOptions = {},
-  resolutionBase?: string
+  resolutionBase?: string,
 ): Promise<Buffer> {
-  const [bytecode] = await compileToBytecodeBatchForRuntime(
-    [code],
-    options,
-    resolutionBase
-  );
+  const [bytecode] = await compileToBytecodeBatchForRuntime([code], options, resolutionBase);
   if (!bytecode) {
     throw new Error("Bytecode compiler produced no output");
   }
@@ -295,14 +269,10 @@ export async function compileToBytecodeForRuntime(
 export function compileToBytecodeBatchForRuntime(
   codes: string[],
   options: BytecodeRuntimeOptions = {},
-  resolutionBase?: string
+  resolutionBase?: string,
 ): Promise<Buffer[]> {
   if (options.runtime === "electron") {
-    return compileToElectronBytecodeBatch(
-      codes,
-      options.electronPath,
-      resolutionBase
-    );
+    return compileToElectronBytecodeBatch(codes, options.electronPath, resolutionBase);
   }
 
   return Promise.resolve(codes.map((code) => compileToBytecode(code)));

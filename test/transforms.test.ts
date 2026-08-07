@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseAst } from "vite";
+import { describe, expect, it } from "vite-plus/test";
+import { parseAst } from "vite7";
 import {
   rewriteRequireSpecifiers,
   transformCode as transformCodeWithParser,

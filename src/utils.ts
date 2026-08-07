@@ -16,7 +16,7 @@ export function toRelativePath(from: string, to: string): string {
  */
 export function resolveBuildOutputs(
   outputs: OutputOptions | OutputOptions[] | undefined,
-  libOptions: LibraryOptions | false
+  libOptions: LibraryOptions | false,
 ): OutputOptions | OutputOptions[] | undefined {
   if (libOptions && !Array.isArray(outputs)) {
     const libFormats = libOptions.formats || [];

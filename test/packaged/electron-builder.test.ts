@@ -3,8 +3,8 @@ import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { build as viteBuild } from "vite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { build as viteBuild } from "vite7";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { resolveElectronPath } from "../../src/compiler";
 import { bytecodePlugin } from "../../src/index";
 
