@@ -41,13 +41,24 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Check build output
+      - name: Check published build output
         run: |
-          if [ ! -f "dist/index.js" ] || [ ! -f "dist/index.cjs" ] || [ ! -f "dist/index.d.ts" ]; then
-            echo "Build output is incomplete"
-            exit 1
-          fi
-          echo "Build output verified successfully"
+          node -e '
+            const fs = require("node:fs");
+            const packageJson = require("./package.json");
+            const entryPoints = new Set([
+              packageJson.main,
+              packageJson.module,
+              packageJson.types,
+              ...Object.values(packageJson.exports["."]),
+            ]);
+            const missing = [...entryPoints].filter((entryPoint) => !fs.existsSync(entryPoint));
+            if (missing.length > 0) {
+              console.error(`Build output is incomplete: ${missing.join(", ")}`);
+              process.exit(1);
+            }
+            console.log("Published build output verified successfully");
+          '
 
   # Node's supported release lines move on a published schedule, so they are
   # resolved at run time for the same reason the Electron matrix is.
