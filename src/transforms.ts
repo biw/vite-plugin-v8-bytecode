@@ -1,4 +1,10 @@
-import type { ParseAst, SourceMapInput } from "rollup";
+import type { ParserOptions, Rolldown } from "vite";
+
+type ParseAst = (
+  input: string,
+  options?: (ParserOptions & { allowReturnOutsideFunction?: boolean }) | null,
+) => unknown;
+type SourceMapInput = Rolldown.SourceMapInput;
 
 type JavaScriptNode = {
   end: number;
@@ -33,8 +39,7 @@ type Scope = {
   parent: Scope | null;
 };
 
-const BASE64_CHARACTERS =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const CHAR_CODE_CHUNK_SIZE = 4096;
 
 /**
@@ -47,15 +52,13 @@ export function transformCode(
   obfuscatedStrings: string[],
   parse: ParseAst,
   sourceMaps: boolean = false,
-  sourceFileName: string = "chunk.js"
+  sourceFileName: string = "chunk.js",
 ): { code: string; map?: SourceMapInput } | null {
   if (obfuscatedStrings.length === 0) {
     return null;
   }
 
-  const ast = asJavaScriptNode(
-    parse(code, { allowReturnOutsideFunction: true })
-  );
+  const ast = asJavaScriptNode(parse(code, { allowReturnOutsideFunction: true }));
   const selectedValues = new Set(obfuscatedStrings);
   const replacements: SourceEdit[] = [];
   const identifiers = new Set<string>();
@@ -83,10 +86,7 @@ export function transformCode(
     return null;
   }
 
-  const helperName = getUniqueIdentifier(
-    "_viteBytecodeFromCharCode",
-    identifiers
-  );
+  const helperName = getUniqueIdentifier("_viteBytecodeFromCharCode", identifiers);
   for (const replacement of replacements) {
     const value = replacement.literalValue;
     if (value === undefined) {
@@ -108,12 +108,7 @@ export function transformCode(
   return {
     code: transformed.code,
     map: sourceMaps
-      ? createSourceMap(
-          sourceFileName,
-          code,
-          transformed.mappingPoints,
-          transformed.code
-        )
+      ? createSourceMap(sourceFileName, code, transformed.mappingPoints, transformed.code)
       : undefined,
   };
 }
@@ -124,15 +119,13 @@ export function transformCode(
 export function rewriteRequireSpecifiers(
   code: string,
   replace: (specifier: string) => string | undefined,
-  parse: ParseAst
+  parse: ParseAst,
 ): { code: string; rewritten: boolean } {
   if (!code.includes("require")) {
     return { code, rewritten: false };
   }
 
-  const ast = asJavaScriptNode(
-    parse(code, { allowReturnOutsideFunction: true })
-  );
+  const ast = asJavaScriptNode(parse(code, { allowReturnOutsideFunction: true }));
   const scopeByNode = createScopes(ast);
   const replacements: SourceEdit[] = [];
 
@@ -183,7 +176,7 @@ export function rewriteRequireSpecifiers(
 
 function getEligibleStringValue(
   node: JavaScriptNode,
-  parent: ParentNode | null
+  parent: ParentNode | null,
 ): string | undefined {
   if (node.type === "Literal" && typeof node.value === "string") {
     if (!parent || shouldPreserveStringLiteral(node, parent)) {
@@ -198,8 +191,7 @@ function getEligibleStringValue(
     node.expressions.length !== 0 ||
     !Array.isArray(node.quasis) ||
     node.quasis.length !== 1 ||
-    (parent?.node.type === "TaggedTemplateExpression" &&
-      parent.key === "quasi")
+    (parent?.node.type === "TaggedTemplateExpression" && parent.key === "quasi")
   ) {
     return undefined;
   }
@@ -213,10 +205,7 @@ function getEligibleStringValue(
   return typeof cooked === "string" ? cooked : undefined;
 }
 
-function shouldPreserveStringLiteral(
-  node: JavaScriptNode,
-  parent: ParentNode
-): boolean {
+function shouldPreserveStringLiteral(node: JavaScriptNode, parent: ParentNode): boolean {
   const parentNode = parent.node;
 
   if (
@@ -258,9 +247,7 @@ function shouldPreserveStringLiteral(
 
   if (parentNode.type === "CallExpression" && parent.key === "arguments") {
     const callee = asJavaScriptNodeOrNull(parentNode.callee);
-    const args = Array.isArray(parentNode.arguments)
-      ? parentNode.arguments
-      : [];
+    const args = Array.isArray(parentNode.arguments) ? parentNode.arguments : [];
     if (args[0] !== node || !callee) {
       return false;
     }
@@ -282,25 +269,16 @@ function shouldPreserveStringLiteral(
   return false;
 }
 
-function createObfuscatedExpression(
-  helperName: string,
-  value: string
-): string {
+function createObfuscatedExpression(helperName: string, value: string): string {
   const characterCodes: number[] = [];
   for (let index = 0; index < value.length; index++) {
     characterCodes.push(value.charCodeAt(index));
   }
 
   const calls: string[] = [];
-  for (
-    let index = 0;
-    index < characterCodes.length;
-    index += CHAR_CODE_CHUNK_SIZE
-  ) {
+  for (let index = 0; index < characterCodes.length; index += CHAR_CODE_CHUNK_SIZE) {
     calls.push(
-      `${helperName}(${characterCodes
-        .slice(index, index + CHAR_CODE_CHUNK_SIZE)
-        .join(",")})`
+      `${helperName}(${characterCodes.slice(index, index + CHAR_CODE_CHUNK_SIZE).join(",")})`,
     );
   }
 
@@ -326,11 +304,7 @@ function getUniqueIdentifier(base: string, identifiers: Set<string>): string {
 function getHelperInsertionPoint(ast: JavaScriptNode, code: string): number {
   const hashbangEnd = code.startsWith("#!") ? code.indexOf("\n") : -1;
   let insertionPoint =
-    hashbangEnd === -1
-      ? code.startsWith("#!")
-        ? code.length
-        : 0
-      : hashbangEnd + 1;
+    hashbangEnd === -1 ? (code.startsWith("#!") ? code.length : 0) : hashbangEnd + 1;
   const body = Array.isArray(ast.body) ? ast.body : [];
 
   for (const value of body) {
@@ -350,10 +324,10 @@ function getHelperInsertionPoint(ast: JavaScriptNode, code: string): number {
 
 function applySourceEdits(
   code: string,
-  edits: SourceEdit[]
+  edits: SourceEdit[],
 ): { code: string; mappingPoints: MappingPoint[] } {
   const orderedEdits = [...edits].sort(
-    (left, right) => left.start - right.start || left.end - right.end
+    (left, right) => left.start - right.start || left.end - right.end,
   );
   const lineStarts = getLineStarts(code);
   const mappingPoints: MappingPoint[] = [];
@@ -397,11 +371,7 @@ function applySourceEdits(
   };
 
   for (const edit of orderedEdits) {
-    if (
-      edit.start < cursor ||
-      edit.end < edit.start ||
-      edit.end > code.length
-    ) {
+    if (edit.start < cursor || edit.end < edit.start || edit.end > code.length) {
       throw new Error("Overlapping or invalid JavaScript source edits");
     }
 
@@ -427,7 +397,7 @@ function createSourceMap(
   sourceFileName: string,
   source: string,
   mappingPoints: MappingPoint[],
-  generatedCode: string
+  generatedCode: string,
 ): SourceMapInput {
   const generatedLineCount = generatedCode.split("\n").length;
   const pointsByLine = new Map<number, MappingPoint[]>();
@@ -444,7 +414,7 @@ function createSourceMap(
 
   for (let line = 0; line < generatedLineCount; line++) {
     const points = (pointsByLine.get(line) ?? []).sort(
-      (left, right) => left.generatedColumn - right.generatedColumn
+      (left, right) => left.generatedColumn - right.generatedColumn,
     );
     let previousGeneratedColumn = 0;
     let previousPointColumn = -1;
@@ -482,7 +452,7 @@ function createSourceMap(
 
 function encodeVlq(value: number): string {
   let encoded = "";
-  let vlq = value < 0 ? ((-value) << 1) | 1 : value << 1;
+  let vlq = value < 0 ? (-value << 1) | 1 : value << 1;
 
   do {
     let digit = vlq & 31;
@@ -506,10 +476,7 @@ function getLineStarts(code: string): number[] {
   return lineStarts;
 }
 
-function getLineAndColumn(
-  lineStarts: number[],
-  offset: number
-): { column: number; line: number } {
+function getLineAndColumn(lineStarts: number[], offset: number): { column: number; line: number } {
   let low = 0;
   let high = lineStarts.length;
   while (low + 1 < high) {
@@ -532,11 +499,7 @@ function createScopes(ast: JavaScriptNode): WeakMap<JavaScriptNode, Scope> {
     if (node.type === "Program") {
       scope = createScope(null, true);
     } else {
-      if (
-        (node.type === "FunctionDeclaration" ||
-          node.type === "ClassDeclaration") &&
-        scope
-      ) {
+      if ((node.type === "FunctionDeclaration" || node.type === "ClassDeclaration") && scope) {
         addPatternBindings(node.id, scope.bindings);
       }
 
@@ -550,10 +513,7 @@ function createScopes(ast: JavaScriptNode): WeakMap<JavaScriptNode, Scope> {
             addPatternBindings(parameter, scope.bindings);
           }
         }
-      } else if (
-        node.type === "ClassDeclaration" ||
-        node.type === "ClassExpression"
-      ) {
+      } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
         scope = createScope(scope, false);
         addPatternBindings(node.id, scope.bindings);
       } else if (
@@ -578,8 +538,7 @@ function createScopes(ast: JavaScriptNode): WeakMap<JavaScriptNode, Scope> {
     scopeByNode.set(node, scope);
 
     if (node.type === "VariableDeclaration") {
-      const declarationScope =
-        node.kind === "var" ? getFunctionScope(scope) : scope;
+      const declarationScope = node.kind === "var" ? getFunctionScope(scope) : scope;
       if (Array.isArray(node.declarations)) {
         for (const value of node.declarations) {
           const declaration = asJavaScriptNodeOrNull(value);
@@ -667,7 +626,7 @@ function addPatternBindings(value: unknown, bindings: Set<string>): void {
 function walkJavaScript(
   node: JavaScriptNode,
   parent: ParentNode | null,
-  visit: (node: JavaScriptNode, parent: ParentNode | null) => void
+  visit: (node: JavaScriptNode, parent: ParentNode | null) => void,
 ): void {
   visit(node, parent);
   forEachChildNode(node, (child, key) => {
@@ -677,7 +636,7 @@ function walkJavaScript(
 
 function forEachChildNode(
   node: JavaScriptNode,
-  visit: (node: JavaScriptNode, key: string) => void
+  visit: (node: JavaScriptNode, key: string) => void,
 ): void {
   for (const [key, value] of Object.entries(node)) {
     if (key === "start" || key === "end" || key === "type") {

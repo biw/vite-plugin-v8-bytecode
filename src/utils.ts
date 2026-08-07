@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { LibraryOptions } from "vite";
-import type { OutputOptions } from "rollup";
+
+type OutputOptions = { format?: string };
 
 /**
  * Converts an absolute path to a relative path for require() statements
@@ -15,8 +16,8 @@ export function toRelativePath(from: string, to: string): string {
  * Resolves build outputs considering library options
  */
 export function resolveBuildOutputs(
-  outputs: OutputOptions | OutputOptions[] | undefined,
-  libOptions: LibraryOptions | false
+  outputs: object | object[] | undefined,
+  libOptions: LibraryOptions | false,
 ): OutputOptions | OutputOptions[] | undefined {
   if (libOptions && !Array.isArray(outputs)) {
     const libFormats = libOptions.formats || [];
@@ -24,7 +25,7 @@ export function resolveBuildOutputs(
       return libFormats.map((format) => ({ ...outputs, format }));
     }
   }
-  return outputs;
+  return outputs as OutputOptions | OutputOptions[] | undefined;
 }
 
 /**

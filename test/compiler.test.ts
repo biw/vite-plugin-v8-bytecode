@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vite-plus/test";
 import vm from "node:vm";
 import fs from "node:fs";
 import path from "node:path";
@@ -38,10 +38,7 @@ module.exports = { message };
       // Bytecode should be generated from wrapped code
       // We can verify this by checking the source length stored in bytecode
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -50,8 +47,7 @@ module.exports = { message };
 
       // Wrapped code should be longer than original
       const wrappedLength =
-        `(function (exports, require, module, __filename, __dirname) { ${testCode}\n});`
-          .length;
+        `(function (exports, require, module, __filename, __dirname) { ${testCode}\n});`.length;
       expect(length).toBe(wrappedLength);
     });
 
@@ -66,14 +62,8 @@ module.exports = { message };
       const refBytecode = refScript.cachedData!;
 
       // Flag hash should match the reference
-      const bytecodeFlags = bytecode.subarray(
-        FLAG_HASH_OFFSET,
-        FLAG_HASH_OFFSET + 4
-      );
-      const refFlags = refBytecode.subarray(
-        FLAG_HASH_OFFSET,
-        FLAG_HASH_OFFSET + 4
-      );
+      const bytecodeFlags = bytecode.subarray(FLAG_HASH_OFFSET, FLAG_HASH_OFFSET + 4);
+      const refFlags = refBytecode.subarray(FLAG_HASH_OFFSET, FLAG_HASH_OFFSET + 4);
 
       expect(bytecodeFlags.equals(refFlags)).toBe(true);
     });
@@ -93,10 +83,7 @@ module.exports = { message: greeting };
 
       // Get source length from bytecode
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecodeBuffer.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecodeBuffer.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -131,7 +118,7 @@ module.exports = { message: greeting };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       expect(mockModule.exports).toHaveProperty("message");
@@ -153,10 +140,7 @@ module.exports = { message: greeting };
 
       // Get source length
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecodeBuffer.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecodeBuffer.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -186,7 +170,7 @@ module.exports = { message: greeting };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       expect(mockModule.exports.value).toBe(42);
@@ -201,10 +185,7 @@ module.exports = { basename: path.basename('/test/file.js') };
 
       const bytecode = compileToBytecode(testCode);
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -230,7 +211,7 @@ module.exports = { basename: path.basename('/test/file.js') };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       expect(mockModule.exports.basename).toBe("file.js");
@@ -251,10 +232,7 @@ module.exports = { greet };
 
       const bytecode = compileToBytecode(testCode);
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -283,7 +261,7 @@ module.exports = { greet };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       // Function should be defined and executable
@@ -306,10 +284,7 @@ module.exports = { greet };
 
       const bytecode = compileToBytecode(testCode);
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -337,7 +312,7 @@ module.exports = { greet };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       expect(mockModule.exports.greet).toBeDefined();
@@ -365,10 +340,7 @@ module.exports = { outer };
 
       const bytecode = compileToBytecode(testCode);
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -396,7 +368,7 @@ module.exports = { outer };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       // All nested functions should execute correctly
@@ -418,10 +390,7 @@ module.exports = { createCounter };
 
       const bytecode = compileToBytecode(testCode);
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
       let length = 0;
       length |= sourceHash[3] << 24;
       length |= sourceHash[2] << 16;
@@ -447,7 +416,7 @@ module.exports = { createCounter };
         __filename,
         __dirname,
         process,
-        global
+        global,
       );
 
       // Closure should maintain state correctly
@@ -476,10 +445,7 @@ module.exports = { createCounter };
       const bytecode = compileToBytecode(testCode);
 
       const SOURCE_HASH_OFFSET = 8;
-      const sourceHash = bytecode.subarray(
-        SOURCE_HASH_OFFSET,
-        SOURCE_HASH_OFFSET + 4
-      );
+      const sourceHash = bytecode.subarray(SOURCE_HASH_OFFSET, SOURCE_HASH_OFFSET + 4);
 
       expect(sourceHash.length).toBe(4);
       expect(Buffer.isBuffer(sourceHash)).toBe(true);

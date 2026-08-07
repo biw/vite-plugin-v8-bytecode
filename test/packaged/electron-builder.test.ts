@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { build as viteBuild } from "vite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { resolveElectronPath } from "../../src/compiler";
 import { bytecodePlugin } from "../../src/index";
 
@@ -21,10 +21,7 @@ const packagerSpecifier = "electron-builder";
 /** Just the surface this file uses, so the packager needs no type dependency. */
 type ElectronBuilder = {
   Platform: { current: () => { createTarget: (name: string) => unknown } };
-  build: (options: {
-    config: Record<string, unknown>;
-    targets: unknown;
-  }) => Promise<unknown>;
+  build: (options: { config: Record<string, unknown>; targets: unknown }) => Promise<unknown>;
 };
 
 const projectRequire = createRequire(import.meta.url);
@@ -40,9 +37,7 @@ const packagerAvailable = (() => {
 // Skipping locally is fine; skipping in the job that exists to run these is
 // how coverage disappears without anyone noticing.
 if (process.env.REQUIRE_PACKAGED_TESTS && !packagerAvailable) {
-  throw new Error(
-    "electron-builder is not installed but REQUIRE_PACKAGED_TESTS is set."
-  );
+  throw new Error("electron-builder is not installed but REQUIRE_PACKAGED_TESTS is set.");
 }
 
 /**
@@ -87,30 +82,20 @@ async function findExecutable(outputDirectory: string): Promise<string> {
       throw new Error(`No output directory in ${outputDirectory}`);
     }
     const bundleDirectory = path.join(outputDirectory, bundleParent.name);
-    const bundle = (await readdir(bundleDirectory)).find((name) =>
-      name.endsWith(".app")
-    );
+    const bundle = (await readdir(bundleDirectory)).find((name) => name.endsWith(".app"));
     if (!bundle) {
       throw new Error(`No .app bundle in ${bundleDirectory}`);
     }
-    return path.join(
-      bundleDirectory,
-      bundle,
-      "Contents",
-      "MacOS",
-      path.basename(bundle, ".app")
-    );
+    return path.join(bundleDirectory, bundle, "Contents", "MacOS", path.basename(bundle, ".app"));
   }
 
-  const unpacked = entries.find(
-    (entry) => entry.isDirectory() && entry.name.endsWith("unpacked")
-  );
+  const unpacked = entries.find((entry) => entry.isDirectory() && entry.name.endsWith("unpacked"));
   if (!unpacked) {
     throw new Error(`No unpacked directory in ${outputDirectory}`);
   }
   const directory = path.join(outputDirectory, unpacked.name);
   const executable = (await readdir(directory)).find((name) =>
-    process.platform === "win32" ? name.endsWith(".exe") : name === "bytecode-fixture"
+    process.platform === "win32" ? name.endsWith(".exe") : name === "bytecode-fixture",
   );
   if (!executable) {
     throw new Error(`No executable in ${directory}`);
@@ -118,10 +103,7 @@ async function findExecutable(outputDirectory: string): Promise<string> {
   return path.join(directory, executable);
 }
 
-function runPackagedApplication(
-  executablePath: string,
-  userDataDirectory: string
-): Promise<void> {
+function runPackagedApplication(executablePath: string, userDataDirectory: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const environment: NodeJS.ProcessEnv = { ...process.env };
     delete environment.ELECTRON_RUN_AS_NODE;
@@ -154,10 +136,8 @@ function runPackagedApplication(
       child.kill("SIGKILL");
       settleOnce(
         new Error(
-          `Packaged app did not exit within 60s: ${Buffer.concat(stderr)
-            .toString("utf8")
-            .trim()}`
-        )
+          `Packaged app did not exit within 60s: ${Buffer.concat(stderr).toString("utf8").trim()}`,
+        ),
       );
     }, 60_000);
 
@@ -168,11 +148,11 @@ function runPackagedApplication(
         settleOnce(
           new Error(
             `Packaged app exited with ${signal ?? `code ${String(exitCode)}`}: ${Buffer.concat(
-              stderr
+              stderr,
             )
               .toString("utf8")
-              .trim()}`
-          )
+              .trim()}`,
+          ),
         );
         return;
       }
@@ -207,130 +187,128 @@ const VARIANTS = [
 ] as const;
 
 for (const { fuses, name, unsupported } of VARIANTS) {
-describe.skipIf(!packagerAvailable || unsupported)(
-  `electron-builder packaged app (${name})`,
-  () => {
-  let workingDirectory: string;
-  let result: PackagedResult;
-  let archiveContents: string[];
+  describe.skipIf(!packagerAvailable || unsupported)(
+    `electron-builder packaged app (${name})`,
+    () => {
+      let workingDirectory: string;
+      let result: PackagedResult;
+      let archiveContents: string[];
 
-  // Packaged once per variant. Repackaging per assertion would dominate the
-  // runtime of this suite for no additional coverage.
-  beforeAll(async () => {
-    workingDirectory = await mkdtemp(path.join(tmpdir(), "vite-bytecode-pkg-"));
-    const appDirectory = path.join(workingDirectory, "app");
-    const outputDirectory = path.join(workingDirectory, "out");
-    const userDataDirectory = path.join(workingDirectory, "user-data");
-    const entryPath = path.join(appDirectory, "src", "main.js");
-    const priorNodeEnv = process.env.NODE_ENV;
+      // Packaged once per variant. Repackaging per assertion would dominate the
+      // runtime of this suite for no additional coverage.
+      beforeAll(async () => {
+        workingDirectory = await mkdtemp(path.join(tmpdir(), "vite-bytecode-pkg-"));
+        const appDirectory = path.join(workingDirectory, "app");
+        const outputDirectory = path.join(workingDirectory, "out");
+        const userDataDirectory = path.join(workingDirectory, "user-data");
+        const entryPath = path.join(appDirectory, "src", "main.js");
+        const priorNodeEnv = process.env.NODE_ENV;
 
-    try {
-      await mkdir(path.dirname(entryPath), { recursive: true });
-      await Promise.all([
-        writeFile(entryPath, entrySource),
-        writeFile(
-          path.join(appDirectory, "package.json"),
-          JSON.stringify({
-            main: "dist/main.js",
-            name: "bytecode-fixture",
-            type: "module",
-            version: "1.0.0",
-          })
-        ),
-      ]);
+        try {
+          await mkdir(path.dirname(entryPath), { recursive: true });
+          await Promise.all([
+            writeFile(entryPath, entrySource),
+            writeFile(
+              path.join(appDirectory, "package.json"),
+              JSON.stringify({
+                main: "dist/main.js",
+                name: "bytecode-fixture",
+                type: "module",
+                version: "1.0.0",
+              }),
+            ),
+          ]);
 
-      process.env.NODE_ENV = "production";
-      await viteBuild({
-        configFile: false,
-        logLevel: "silent",
-        plugins: [
-          bytecodePlugin({
-            electronPath: resolveElectronPath(),
-            runtime: "electron",
-          }),
-        ],
-        root: appDirectory,
-        build: {
-          outDir: path.join(appDirectory, "dist"),
-          rollupOptions: {
-            external: ["electron", /^node:/],
-            input: entryPath,
-            output: { entryFileNames: "main.js" },
-          },
-        },
+          process.env.NODE_ENV = "production";
+          await viteBuild({
+            configFile: false,
+            logLevel: "silent",
+            plugins: [
+              bytecodePlugin({
+                electronPath: resolveElectronPath(),
+                runtime: "electron",
+              }),
+            ],
+            root: appDirectory,
+            build: {
+              outDir: path.join(appDirectory, "dist"),
+              rolldownOptions: {
+                external: ["electron", /^node:/],
+                input: entryPath,
+                output: { entryFileNames: "main.js" },
+              },
+            },
+          });
+
+          // Imported through a variable specifier on purpose: the packager is
+          // installed only in the packaging job, so a literal specifier would make
+          // `tsc --noEmit` fail everywhere else.
+          const { build: packageApp, Platform } = (await import(
+            packagerSpecifier
+          )) as ElectronBuilder;
+          await packageApp({
+            targets: Platform.current().createTarget("dir"),
+            config: {
+              appId: "dev.vitepluginv8bytecode.fixture",
+              asar: true,
+              directories: { app: appDirectory, output: outputDirectory },
+              electronFuses: fuses,
+              electronVersion: projectRequire("electron/package.json").version,
+              npmRebuild: false,
+              // Unsigned on purpose: signing is the packager's concern, and ad hoc
+              // signing has tripped platform malware scanners in this repository.
+              mac: { identity: null },
+            },
+          });
+
+          const executablePath = await findExecutable(outputDirectory);
+          await runPackagedApplication(executablePath, userDataDirectory);
+
+          result = JSON.parse(
+            await readFile(path.join(userDataDirectory, "result.json"), "utf8"),
+          ) as PackagedResult;
+
+          const asarPath = path.join(
+            path.dirname(executablePath),
+            process.platform === "darwin" ? "../Resources/app.asar" : "resources/app.asar",
+          );
+          const { listPackage } = await import("@electron/asar");
+          archiveContents = listPackage(path.resolve(asarPath), { isPack: false });
+        } finally {
+          if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
+          else process.env.NODE_ENV = priorNodeEnv;
+        }
+      }, 600_000);
+
+      afterAll(async () => {
+        // A packaged Electron app is ~286 MB; leaving these behind fills the
+        // runner disk within a few matrix cells.
+        if (workingDirectory) {
+          await rm(workingDirectory, { force: true, recursive: true });
+        }
       });
 
-      // Imported through a variable specifier on purpose: the packager is
-      // installed only in the packaging job, so a literal specifier would make
-      // `tsc --noEmit` fail everywhere else.
-      const { build: packageApp, Platform } = (await import(
-        packagerSpecifier
-      )) as ElectronBuilder;
-      await packageApp({
-        targets: Platform.current().createTarget("dir"),
-        config: {
-          appId: "dev.vitepluginv8bytecode.fixture",
-          asar: true,
-          directories: { app: appDirectory, output: outputDirectory },
-          electronFuses: fuses,
-          electronVersion: projectRequire("electron/package.json").version,
-          npmRebuild: false,
-          // Unsigned on purpose: signing is the packager's concern, and ad hoc
-          // signing has tripped platform malware scanners in this repository.
-          mac: { identity: null },
-        },
+      it("executes bytecode inside the packaged application", () => {
+        expect(result.answer).toBe(42);
       });
 
-      const executablePath = await findExecutable(outputDirectory);
-      await runPackagedApplication(executablePath, userDataDirectory);
+      it("reports itself as packaged", () => {
+        expect(result.isPackaged).toBe(true);
+      });
 
-      result = JSON.parse(
-        await readFile(path.join(userDataDirectory, "result.json"), "utf8")
-      ) as PackagedResult;
+      it("runs its code from inside app.asar", () => {
+        expect(result.directory).toContain("app.asar");
+      });
 
-      const asarPath = path.join(
-        path.dirname(executablePath),
-        process.platform === "darwin" ? "../Resources/app.asar" : "resources/app.asar"
-      );
-      const { listPackage } = await import("@electron/asar");
-      archiveContents = listPackage(path.resolve(asarPath), { isPack: false });
-    } finally {
-      if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = priorNodeEnv;
-    }
-  }, 600_000);
-
-  afterAll(async () => {
-    // A packaged Electron app is ~286 MB; leaving these behind fills the
-    // runner disk within a few matrix cells.
-    if (workingDirectory) {
-      await rm(workingDirectory, { force: true, recursive: true });
-    }
-  });
-
-  it("executes bytecode inside the packaged application", () => {
-    expect(result.answer).toBe(42);
-  });
-
-  it("reports itself as packaged", () => {
-    expect(result.isPackaged).toBe(true);
-  });
-
-  it("runs its code from inside app.asar", () => {
-    expect(result.directory).toContain("app.asar");
-  });
-
-  it("ships the bytecode inside the archive rather than beside it", () => {
-    expect(archiveContents).toContain(
-      path.sep === "\\" ? "\\dist\\main.jsc" : "/dist/main.jsc"
-    );
-    expect(archiveContents.some((entry) => entry.endsWith("bytecode-loader.cjs"))).toBe(
-      true
-    );
-    expect(archiveContents).toContain(
-      path.sep === "\\" ? "\\dist\\package.json" : "/dist/package.json"
-    );
-  });
-  }
-);
+      it("ships the bytecode inside the archive rather than beside it", () => {
+        expect(archiveContents).toContain(
+          path.sep === "\\" ? "\\dist\\main.jsc" : "/dist/main.jsc",
+        );
+        expect(archiveContents.some((entry) => entry.endsWith("bytecode-loader.cjs"))).toBe(true);
+        expect(archiveContents).toContain(
+          path.sep === "\\" ? "\\dist\\package.json" : "/dist/package.json",
+        );
+      });
+    },
+  );
 }

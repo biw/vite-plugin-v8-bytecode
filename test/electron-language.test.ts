@@ -3,11 +3,8 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeAll, describe, expect, it } from "vitest";
-import {
-  compileToBytecodeBatchForRuntime,
-  resolveElectronPath,
-} from "../src/compiler";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { compileToBytecodeBatchForRuntime, resolveElectronPath } from "../src/compiler";
 import { getBytecodeLoaderCode } from "../src/loader";
 import { LANGUAGE_CASES } from "./language-cases";
 
@@ -27,12 +24,11 @@ import { LANGUAGE_CASES } from "./language-cases";
  */
 
 const hasElectronDisplay =
-  process.platform !== "linux" ||
-  Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 
 if (process.env.CI && !hasElectronDisplay) {
   throw new Error(
-    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`."
+    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`.",
   );
 }
 
@@ -79,10 +75,7 @@ app.whenReady().then(async () => {
 });
 `;
 
-function runElectronApplication(
-  directory: string,
-  userDataDirectory: string
-): Promise<void> {
+function runElectronApplication(directory: string, userDataDirectory: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const environment: NodeJS.ProcessEnv = { ...process.env };
     delete environment.ELECTRON_RUN_AS_NODE;
@@ -119,10 +112,8 @@ function runElectronApplication(
       child.kill("SIGKILL");
       settleOnce(
         new Error(
-          `Electron did not exit within 120s: ${Buffer.concat(stderr)
-            .toString("utf8")
-            .trim()}`
-        )
+          `Electron did not exit within 120s: ${Buffer.concat(stderr).toString("utf8").trim()}`,
+        ),
       );
     }, 120_000);
 
@@ -132,12 +123,10 @@ function runElectronApplication(
       if (exitCode !== 0 || signal) {
         settleOnce(
           new Error(
-            `Electron exited with ${signal ?? `code ${String(exitCode)}`}: ${Buffer.concat(
-              stderr
-            )
+            `Electron exited with ${signal ?? `code ${String(exitCode)}`}: ${Buffer.concat(stderr)
               .toString("utf8")
-              .trim()}`
-          )
+              .trim()}`,
+          ),
         );
         return;
       }
@@ -150,9 +139,7 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
   let results: CaseResult[];
 
   beforeAll(async () => {
-    const directory = await mkdtemp(
-      path.join(tmpdir(), "vite-bytecode-electron-language-")
-    );
+    const directory = await mkdtemp(path.join(tmpdir(), "vite-bytecode-electron-language-"));
     const userDataDirectory = path.join(directory, "user-data");
 
     try {
@@ -165,16 +152,13 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
 
       await Promise.all([
         ...bytecode.map((buffer, index) =>
-          writeFile(path.join(directory, `case-${String(index)}.jsc`), buffer)
+          writeFile(path.join(directory, `case-${String(index)}.jsc`), buffer),
         ),
         writeFile(
           path.join(directory, "expected.json"),
-          JSON.stringify(LANGUAGE_CASES.map(([, , expected]) => expected))
+          JSON.stringify(LANGUAGE_CASES.map(([, , expected]) => expected)),
         ),
-        writeFile(
-          path.join(directory, "bytecode-loader.cjs"),
-          getBytecodeLoaderCode()
-        ),
+        writeFile(path.join(directory, "bytecode-loader.cjs"), getBytecodeLoaderCode()),
         writeFile(path.join(directory, "main.cjs"), mainScript),
         writeFile(
           path.join(directory, "package.json"),
@@ -182,7 +166,7 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
             main: "main.cjs",
             name: "vite-bytecode-electron-language",
             private: true,
-          })
+          }),
         ),
       ]);
 
@@ -192,14 +176,14 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
       await symlink(
         fileURLToPath(new URL("../node_modules", import.meta.url)),
         path.join(directory, "node_modules"),
-        "dir"
+        "dir",
       );
 
       // One Electron process runs it.
       await runElectronApplication(directory, userDataDirectory);
 
       results = JSON.parse(
-        await readFile(path.join(userDataDirectory, "results.json"), "utf8")
+        await readFile(path.join(userDataDirectory, "results.json"), "utf8"),
       ) as CaseResult[];
     } finally {
       await rm(directory, { force: true, recursive: true });
@@ -217,6 +201,6 @@ describe.skipIf(!hasElectronDisplay)("Electron language compatibility", () => {
 
       expect(result.error).toBeNull();
       expect(result.ok).toBe(true);
-    }
+    },
   );
 });

@@ -55,7 +55,7 @@ jobs:
         if: steps.revision.outputs.is_current == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Check if version should be published
         if: steps.revision.outputs.is_current == 'true'
@@ -101,8 +101,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
       - name: Install dependencies

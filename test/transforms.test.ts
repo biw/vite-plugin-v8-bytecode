@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { parseAst } from "vite";
 import {
   rewriteRequireSpecifiers,
@@ -8,25 +8,16 @@ import {
 function transformCode(
   code: string,
   obfuscatedStrings: string[],
-  sourceMaps: boolean = false
+  sourceMaps: boolean = false,
 ): ReturnType<typeof transformCodeWithParser> {
-  return transformCodeWithParser(
-    code,
-    obfuscatedStrings,
-    parseAst,
-    sourceMaps
-  );
+  return transformCodeWithParser(code, obfuscatedStrings, parseAst, sourceMaps);
 }
 
 function rewriteRequires(
   code: string,
-  replacements: Readonly<Record<string, string>>
+  replacements: Readonly<Record<string, string>>,
 ): ReturnType<typeof rewriteRequireSpecifiers> {
-  return rewriteRequireSpecifiers(
-    code,
-    (specifier) => replacements[specifier],
-    parseAst
-  );
+  return rewriteRequireSpecifiers(code, (specifier) => replacements[specifier], parseAst);
 }
 
 describe("String obfuscation transform", () => {
@@ -42,12 +33,8 @@ describe("String obfuscation transform", () => {
 
     expect(transformed).not.toBeNull();
     expect(transformed!.code).not.toContain('"OBFUSCATED_VALUE"');
-    expect(transformed!.code).toContain(
-      "globalThis.String.fromCharCode.bind(globalThis.String)"
-    );
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      "OBFUSCATED_VALUE"
-    );
+    expect(transformed!.code).toContain("globalThis.String.fromCharCode.bind(globalThis.String)");
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe("OBFUSCATED_VALUE");
   });
 
   it("obfuscates a selected static template literal", () => {
@@ -56,9 +43,7 @@ describe("String obfuscation transform", () => {
 
     expect(transformed).not.toBeNull();
     expect(transformed!.code).not.toContain("`OBFUSCATED_VALUE`");
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      "OBFUSCATED_VALUE"
-    );
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe("OBFUSCATED_VALUE");
   });
 
   it("matches decoded string values while retaining unmatched literals", () => {
@@ -78,66 +63,28 @@ describe("String obfuscation transform", () => {
 
   it("obfuscates every selected occurrence with one shared helper", () => {
     const code =
-      'const first = "VALUE_ONE"; const second = "VALUE_TWO"; ' +
-      "const result = first + second;";
+      'const first = "VALUE_ONE"; const second = "VALUE_TWO"; ' + "const result = first + second;";
     const transformed = transformCode(code, ["VALUE_ONE", "VALUE_TWO"]);
 
     expect(transformed).not.toBeNull();
     expect(transformed!.code).not.toContain('"VALUE_ONE"');
     expect(transformed!.code).not.toContain('"VALUE_TWO"');
-    expect(
-      transformed!.code.match(/globalThis\.String\.fromCharCode/g)
-    ).toHaveLength(1);
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      "VALUE_ONEVALUE_TWO"
-    );
+    expect(transformed!.code.match(/globalThis\.String\.fromCharCode/g)).toHaveLength(1);
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe("VALUE_ONEVALUE_TWO");
   });
 
   it.each([
-    [
-      "object property key",
-      'const value = { "OBFUSCATED_VALUE": "ok" };',
-    ],
-    [
-      "object method key",
-      'const value = { "OBFUSCATED_VALUE"() { return "ok"; } };',
-    ],
-    [
-      "class method key",
-      'const value = class { "OBFUSCATED_VALUE"() { return "ok"; } };',
-    ],
-    [
-      "class field key",
-      'const value = class { "OBFUSCATED_VALUE" = "ok"; };',
-    ],
-    [
-      "object accessor key",
-      'const value = { get "OBFUSCATED_VALUE"() { return "ok"; } };',
-    ],
-    [
-      "class accessor key",
-      'const value = class { set "OBFUSCATED_VALUE"(next) {} };',
-    ],
-    [
-      "computed member property",
-      'const value = object["OBFUSCATED_VALUE"];',
-    ],
-    [
-      "require specifier",
-      'const value = require("OBFUSCATED_VALUE");',
-    ],
-    [
-      "require.resolve specifier",
-      'const value = require.resolve("OBFUSCATED_VALUE");',
-    ],
-    [
-      "dynamic import specifier",
-      'const value = import("OBFUSCATED_VALUE");',
-    ],
-    [
-      "tagged template",
-      "const value = tag`OBFUSCATED_VALUE`;",
-    ],
+    ["object property key", 'const value = { "OBFUSCATED_VALUE": "ok" };'],
+    ["object method key", 'const value = { "OBFUSCATED_VALUE"() { return "ok"; } };'],
+    ["class method key", 'const value = class { "OBFUSCATED_VALUE"() { return "ok"; } };'],
+    ["class field key", 'const value = class { "OBFUSCATED_VALUE" = "ok"; };'],
+    ["object accessor key", 'const value = { get "OBFUSCATED_VALUE"() { return "ok"; } };'],
+    ["class accessor key", 'const value = class { set "OBFUSCATED_VALUE"(next) {} };'],
+    ["computed member property", 'const value = object["OBFUSCATED_VALUE"];'],
+    ["require specifier", 'const value = require("OBFUSCATED_VALUE");'],
+    ["require.resolve specifier", 'const value = require.resolve("OBFUSCATED_VALUE");'],
+    ["dynamic import specifier", 'const value = import("OBFUSCATED_VALUE");'],
+    ["tagged template", "const value = tag`OBFUSCATED_VALUE`;"],
   ])("leaves a matching %s unchanged", (_kind, code) => {
     expect(transformCode(code, ["OBFUSCATED_VALUE"])).toBeNull();
   });
@@ -166,10 +113,7 @@ describe("String obfuscation transform", () => {
 
   it("chunks large strings below runtime argument limits", () => {
     const value = "x".repeat(150_000);
-    const transformed = transformCode(
-      `const result = ${JSON.stringify(value)};`,
-      [value]
-    );
+    const transformed = transformCode(`const result = ${JSON.stringify(value)};`, [value]);
 
     expect(transformed).not.toBeNull();
     expect(new Function(`${transformed!.code}; return result;`)()).toBe(value);
@@ -223,9 +167,7 @@ describe("String obfuscation transform", () => {
     const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
     expect(transformed).not.toBeNull();
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      "OBFUSCATED_VALUE"
-    );
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe("OBFUSCATED_VALUE");
   });
 
   it("captures String.fromCharCode before user code mutates it", () => {
@@ -240,9 +182,7 @@ describe("String obfuscation transform", () => {
     const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
     expect(transformed).not.toBeNull();
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      "OBFUSCATED_VALUE"
-    );
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe("OBFUSCATED_VALUE");
   });
 
   it("avoids collisions with identifiers in generated chunks", () => {
@@ -253,9 +193,7 @@ describe("String obfuscation transform", () => {
     const transformed = transformCode(code, ["OBFUSCATED_VALUE"]);
 
     expect(transformed).not.toBeNull();
-    expect(transformed!.code).toContain(
-      "const _viteBytecodeFromCharCode$1 ="
-    );
+    expect(transformed!.code).toContain("const _viteBytecodeFromCharCode$1 =");
     expect(new Function(`${transformed!.code}; return result;`)()).toEqual([
       "existing",
       "OBFUSCATED_VALUE",
@@ -293,30 +231,25 @@ describe("String obfuscation transform", () => {
 
     expect(transformed).not.toBeNull();
     expect(transformed!.code.indexOf('"use strict"')).toBeLessThan(
-      transformed!.code.indexOf("const _viteBytecodeFromCharCode")
+      transformed!.code.indexOf("const _viteBytecodeFromCharCode"),
     );
-    expect(new Function(`${transformed!.code}; return result;`)()).toBe(
-      undefined
-    );
+    expect(new Function(`${transformed!.code}; return result;`)()).toBe(undefined);
   });
 
   it("inserts its helper after a hashbang", () => {
-    const transformed = transformCode(
-      '#!/usr/bin/env node\nconst marker = "OBFUSCATED_VALUE";',
-      ["OBFUSCATED_VALUE"]
-    );
+    const transformed = transformCode('#!/usr/bin/env node\nconst marker = "OBFUSCATED_VALUE";', [
+      "OBFUSCATED_VALUE",
+    ]);
 
     expect(transformed).not.toBeNull();
-    expect(transformed!.code).toMatch(
-      /^#!\/usr\/bin\/env node\n\nconst _viteBytecodeFromCharCode/
-    );
+    expect(transformed!.code).toMatch(/^#!\/usr\/bin\/env node\n\nconst _viteBytecodeFromCharCode/);
   });
 
   it("includes a source map when requested", () => {
     const transformed = transformCode(
       'const marker = "OBFUSCATED_VALUE";',
       ["OBFUSCATED_VALUE"],
-      true
+      true,
     );
 
     expect(transformed?.map).toMatchObject({
@@ -327,15 +260,12 @@ describe("String obfuscation transform", () => {
     expect(
       typeof transformed?.map === "object" && transformed.map
         ? transformed.map.mappings
-        : undefined
+        : undefined,
     ).not.toBe("");
   });
 
   it("does not include a source map by default", () => {
-    const transformed = transformCode(
-      'const marker = "OBFUSCATED_VALUE";',
-      ["OBFUSCATED_VALUE"]
-    );
+    const transformed = transformCode('const marker = "OBFUSCATED_VALUE";', ["OBFUSCATED_VALUE"]);
 
     expect(transformed?.map).toBeUndefined();
   });
@@ -374,9 +304,10 @@ describe("require specifier rewriting", () => {
       object.require("./chunk.js");
     `;
 
-    expect(
-      rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })
-    ).toEqual({ code, rewritten: false });
+    expect(rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })).toEqual({
+      code,
+      rewritten: false,
+    });
   });
 
   it("does not rewrite dynamic or malformed require calls", () => {
@@ -386,36 +317,29 @@ describe("require specifier rewriting", () => {
       require("./chunk.js", options);
     `;
 
-    expect(
-      rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })
-    ).toEqual({ code, rewritten: false });
+    expect(rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })).toEqual({
+      code,
+      rewritten: false,
+    });
   });
 
   it.each([
-    [
-      "function parameter",
-      'function load(require) { return require("./chunk.js"); }',
-    ],
+    ["function parameter", 'function load(require) { return require("./chunk.js"); }'],
     [
       "destructured function parameter",
       'function load({ require }) { return require("./chunk.js"); }',
     ],
-    [
-      "catch binding",
-      'try {} catch (require) { require("./chunk.js"); }',
-    ],
-    [
-      "function expression name",
-      '(function require() { require("./chunk.js"); });',
-    ],
+    ["catch binding", 'try {} catch (require) { require("./chunk.js"); }'],
+    ["function expression name", '(function require() { require("./chunk.js"); });'],
     [
       "class expression name",
       'const Value = class require { static load() { require("./chunk.js"); } };',
     ],
   ])("does not rewrite a require shadowed by a %s", (_kind, code) => {
-    expect(
-      rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })
-    ).toEqual({ code, rewritten: false });
+    expect(rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })).toEqual({
+      code,
+      rewritten: false,
+    });
   });
 
   it("treats var declarations as function-scoped and hoisted", () => {
@@ -426,9 +350,10 @@ describe("require specifier rewriting", () => {
       }
     `;
 
-    expect(
-      rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })
-    ).toEqual({ code, rewritten: false });
+    expect(rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })).toEqual({
+      code,
+      rewritten: false,
+    });
   });
 
   it("limits lexical shadowing to its block", () => {
@@ -454,9 +379,10 @@ describe("require specifier rewriting", () => {
       function require() {}
     `;
 
-    expect(
-      rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })
-    ).toEqual({ code, rewritten: false });
+    expect(rewriteRequires(code, { "./chunk.js": "./chunk.jsc" })).toEqual({
+      code,
+      rewritten: false,
+    });
   });
 
   it("uses a valid JavaScript string literal for replacement paths", () => {

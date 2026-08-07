@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import path from "node:path";
 import { getBytecodeLoaderCode } from "../src/loader";
 
@@ -110,10 +110,7 @@ describe("Bytecode Loader", () => {
         cachedData?: Buffer;
         cachedDataRejected = false;
 
-        constructor(
-          _code: string,
-          options: Record<string, unknown> = {}
-        ) {
+        constructor(_code: string, options: Record<string, unknown> = {}) {
           if (options.produceCachedData) {
             this.cachedData = Buffer.alloc(20);
           } else {
@@ -158,18 +155,14 @@ describe("Bytecode Loader", () => {
 
       const module = { exports: {}, require: () => undefined };
       expect(() => extensions[".jsc"](module, "fixture.jsc")).not.toThrow();
-      expect(bytecodeScriptOptions).not.toHaveProperty(
-        "importModuleDynamically"
-      );
+      expect(bytecodeScriptOptions).not.toHaveProperty("importModuleDynamically");
     });
 
     it("should check for cachedDataRejected", () => {
       const loaderCode = getBytecodeLoaderCode();
 
       expect(loaderCode).toContain("script.cachedDataRejected");
-      expect(loaderCode).toContain(
-        "Invalid or incompatible cached data (cachedDataRejected)"
-      );
+      expect(loaderCode).toContain("Invalid or incompatible cached data (cachedDataRejected)");
     });
 
     it("should setup module require function", () => {

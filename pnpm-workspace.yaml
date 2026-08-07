@@ -11,3 +11,12 @@ allowBuilds:
 
 overrides:
   rollup: "4.52.5"
+  vite: "catalog:"
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.8
+  vite-plus: 0.2.8
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

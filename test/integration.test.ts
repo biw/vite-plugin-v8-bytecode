@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, execSync } from "node:child_process";
@@ -288,9 +288,7 @@ require("./simple.jsc");
       console.error("Stdout:", error.stdout);
       console.error("Stderr:", error.stderr);
       console.error("=== END ERROR ===\n");
-      throw new Error(
-        `Execution failed with exit code ${error.status}\nStderr: ${error.stderr}`
-      );
+      throw new Error(`Execution failed with exit code ${error.status}\nStderr: ${error.stderr}`);
     }
   });
 
@@ -304,7 +302,7 @@ module.exports = {
   builtin: require.resolve("node:path"),
   hasSearchPaths: Array.isArray(paths) && paths.length > 0
 };
-`
+`,
     );
     installLoader();
     const entryFile = writeTestFile(
@@ -317,17 +315,14 @@ if (result.builtin !== "node:path" || !result.hasSearchPaths) {
   throw new Error("bytecode require.resolve API did not match CommonJS");
 }
 console.log("complete require.resolve API");
-`
+`,
     );
 
     expect(() => runNode(entryFile)).not.toThrow();
   });
 
   it("preserves CommonJS metadata, cache identity, and relative resolution", () => {
-    writeTestFile(
-      "nested/dependency.cjs",
-      `module.exports = { token: Symbol("dependency") };`
-    );
+    writeTestFile("nested/dependency.cjs", `module.exports = { token: Symbol("dependency") };`);
     writeBytecodeFixture(
       "nested/semantics.jsc",
       `
@@ -342,7 +337,7 @@ module.exports = {
   cached: require.cache[__filename] === module,
   extensionRegistered: typeof require.extensions[".jsc"] === "function"
 };
-`
+`,
     );
     installLoader();
     const entryFile = writeTestFile(
@@ -366,7 +361,7 @@ if (first.parentFilename !== __filename || first.mainFilename !== __filename) {
   throw new Error("incorrect CommonJS parent/main metadata");
 }
 console.log("CommonJS semantics preserved");
-`
+`,
     );
 
     expect(runNode(entryFile)).toContain("CommonJS semantics preserved");
@@ -381,7 +376,7 @@ exports.phase = "a-loading";
 const b = require("./b.cjs");
 exports.phaseSeenByB = b.phaseSeenFromA;
 exports.phase = "a-ready";
-`
+`,
     );
     writeTestFile(
       "cycle/b.cjs",
@@ -389,7 +384,7 @@ exports.phase = "a-ready";
 "use strict";
 const a = require("./a.jsc");
 exports.phaseSeenFromA = a.phase;
-`
+`,
     );
     installLoader();
     const entryFile = writeTestFile(
@@ -402,7 +397,7 @@ if (a.phase !== "a-ready" || a.phaseSeenByB !== "a-loading") {
   throw new Error("circular dependency exposed incorrect partial exports");
 }
 console.log("circular dependency preserved");
-`
+`,
     );
 
     expect(runNode(entryFile)).toContain("circular dependency preserved");
@@ -434,11 +429,11 @@ Promise.resolve(require("./compatibility.jsc")).then(
     process.exitCode = 1;
   }
 );
-`
+`,
       );
 
       expect(runNode(entryFile)).toContain("compatibility case preserved");
-    }
+    },
   );
 
   it("supports native dynamic import inside bytecode modules", () => {
@@ -450,7 +445,7 @@ module.exports = import("node:path").then((path) => ({
   basename: path.basename("/tmp/example.js"),
   hasJoin: typeof path.join === "function"
 }));
-`
+`,
     );
     installLoader();
     const entryFile = writeTestFile(
@@ -470,7 +465,7 @@ require("./dynamic-import.jsc").then(
     process.exitCode = 1;
   }
 );
-`
+`,
     );
 
     expect(runNode(entryFile)).toContain("native dynamic import preserved");
@@ -482,7 +477,7 @@ require("./dynamic-import.jsc").then(
       `
 "use strict";
 module.exports = { answer: 42 };
-`
+`,
     );
     installLoader();
     const entryFile = writeTestFile(
@@ -496,7 +491,7 @@ if (result.answer !== 42) {
   throw new Error("legacy VM bytecode returned incorrect exports");
 }
 console.log("legacy VM bytecode preserved");
-`
+`,
     );
 
     expect(runNode(entryFile)).toContain("legacy VM bytecode preserved");
@@ -532,7 +527,7 @@ try {
   throw error;
 }
 throw new Error("crafted bytecode was unexpectedly accepted");
-`
+`,
     );
 
     expect(() => runNode(entryFile)).not.toThrow();

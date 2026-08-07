@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackage } from "@electron/asar";
 import { build } from "vite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { resolveElectronPath } from "../src/compiler";
 import { bytecodePlugin } from "../src/index";
 
@@ -18,12 +18,11 @@ import { bytecodePlugin } from "../src/index";
  */
 
 const hasElectronDisplay =
-  process.platform !== "linux" ||
-  Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 
 if (process.env.CI && !hasElectronDisplay) {
   throw new Error(
-    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`."
+    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`.",
   );
 }
 
@@ -48,10 +47,7 @@ app.whenReady().then(() => {
 });
 `;
 
-function runElectronApplication(
-  applicationPath: string,
-  userDataDirectory: string
-): Promise<void> {
+function runElectronApplication(applicationPath: string, userDataDirectory: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const environment: NodeJS.ProcessEnv = { ...process.env };
     delete environment.ELECTRON_RUN_AS_NODE;
@@ -89,10 +85,8 @@ function runElectronApplication(
       child.kill("SIGKILL");
       settleOnce(
         new Error(
-          `Electron did not exit within 30s: ${Buffer.concat(stderr)
-            .toString("utf8")
-            .trim()}`
-        )
+          `Electron did not exit within 30s: ${Buffer.concat(stderr).toString("utf8").trim()}`,
+        ),
       );
     }, 30_000);
 
@@ -105,8 +99,8 @@ function runElectronApplication(
           new Error(
             `Electron exited with ${signal ?? `code ${String(exitCode)}`}${
               details ? `: ${details}` : ""
-            }`
-          )
+            }`,
+          ),
         );
         return;
       }
@@ -116,75 +110,69 @@ function runElectronApplication(
 }
 
 describe.skipIf(!hasElectronDisplay)("Electron asar packaging", () => {
-  it(
-    "loads bytecode from inside app.asar",
-    async () => {
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), "vite-bytecode-asar-")
-      );
-      const outputDirectory = path.join(workingDirectory, "dist");
-      const entryPath = path.join(workingDirectory, "main.cjs");
-      const archivePath = path.join(workingDirectory, "app.asar");
-      const userDataDirectory = path.join(workingDirectory, "user-data");
-      const priorNodeEnv = process.env.NODE_ENV;
+  it("loads bytecode from inside app.asar", async () => {
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), "vite-bytecode-asar-"));
+    const outputDirectory = path.join(workingDirectory, "dist");
+    const entryPath = path.join(workingDirectory, "main.cjs");
+    const archivePath = path.join(workingDirectory, "app.asar");
+    const userDataDirectory = path.join(workingDirectory, "user-data");
+    const priorNodeEnv = process.env.NODE_ENV;
 
-      try {
-        await writeFile(entryPath, entrySource);
-        process.env.NODE_ENV = "production";
-        await build({
-          configFile: false,
-          logLevel: "silent",
-          plugins: [
-            bytecodePlugin({
-              // Exercises the explicit electronPath branch, which also spares
-              // the build from resolving Electron out of a bare temp dir.
-              electronPath: resolveElectronPath(),
-              runtime: "electron",
-            }),
-          ],
-          root: workingDirectory,
-          build: {
-            emptyOutDir: true,
-            outDir: outputDirectory,
-            rollupOptions: {
-              // Vite targets the browser by default, which stubs out node
-              // builtins instead of leaving them to the Electron runtime.
-              external: ["electron", /^node:/],
-              input: entryPath,
-              output: { entryFileNames: "main.cjs", format: "cjs" },
-            },
+    try {
+      await writeFile(entryPath, entrySource);
+      process.env.NODE_ENV = "production";
+      await build({
+        configFile: false,
+        logLevel: "silent",
+        plugins: [
+          bytecodePlugin({
+            // Exercises the explicit electronPath branch, which also spares
+            // the build from resolving Electron out of a bare temp dir.
+            electronPath: resolveElectronPath(),
+            runtime: "electron",
+          }),
+        ],
+        root: workingDirectory,
+        build: {
+          emptyOutDir: true,
+          outDir: outputDirectory,
+          rolldownOptions: {
+            // Vite targets the browser by default, which stubs out node
+            // builtins instead of leaving them to the Electron runtime.
+            external: ["electron", /^node:/],
+            input: entryPath,
+            output: { entryFileNames: "main.cjs", format: "cjs" },
           },
-        });
-        await writeFile(
-          path.join(outputDirectory, "package.json"),
-          JSON.stringify({
-            main: "main.cjs",
-            name: "vite-bytecode-asar",
-            private: true,
-          })
-        );
+        },
+      });
+      await writeFile(
+        path.join(outputDirectory, "package.json"),
+        JSON.stringify({
+          main: "main.cjs",
+          name: "vite-bytecode-asar",
+          private: true,
+        }),
+      );
 
-        await createPackage(outputDirectory, archivePath);
-        // The unpacked build is removed so a passing run cannot be explained
-        // by Electron quietly falling back to loose files on disk.
-        await rm(outputDirectory, { force: true, recursive: true });
+      await createPackage(outputDirectory, archivePath);
+      // The unpacked build is removed so a passing run cannot be explained
+      // by Electron quietly falling back to loose files on disk.
+      await rm(outputDirectory, { force: true, recursive: true });
 
-        await runElectronApplication(archivePath, userDataDirectory);
+      await runElectronApplication(archivePath, userDataDirectory);
 
-        const result = JSON.parse(
-          await readFile(path.join(userDataDirectory, "result.json"), "utf8")
-        ) as { answer: number; directory: string };
-        expect(result.answer).toBe(42);
-        expect(result.directory).toContain("app.asar");
-      } finally {
-        if (priorNodeEnv === undefined) {
-          delete process.env.NODE_ENV;
-        } else {
-          process.env.NODE_ENV = priorNodeEnv;
-        }
-        await rm(workingDirectory, { force: true, recursive: true });
+      const result = JSON.parse(
+        await readFile(path.join(userDataDirectory, "result.json"), "utf8"),
+      ) as { answer: number; directory: string };
+      expect(result.answer).toBe(42);
+      expect(result.directory).toContain("app.asar");
+    } finally {
+      if (priorNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = priorNodeEnv;
       }
-    },
-    90_000
-  );
+      await rm(workingDirectory, { force: true, recursive: true });
+    }
+  }, 90_000);
 });
