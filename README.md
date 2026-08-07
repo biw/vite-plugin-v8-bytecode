@@ -85,7 +85,7 @@ export default defineConfig({
     "globalThis.process.env": "globalThis.process.env",
   },
   build: {
-    rolldownOptions: {
+    rollupOptions: {
       // Leave Electron and Node builtins for the main process to resolve.
       external: (id) =>
         id === "electron" ||

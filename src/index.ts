@@ -1,31 +1,15 @@
 import fs from "node:fs";
-import { builtinModules } from "node:module";
 import path from "node:path";
-import type { Logger, ParserOptions, Plugin, PluginOption, Rolldown } from "vite";
+import type { Plugin, Logger, PluginOption } from "vite";
+import type { OutputBundle, OutputChunk, OutputOptions, ParseAst, SourceMapInput } from "rollup";
 import { compileToBytecodeBatchForRuntime, type BytecodeRuntimeOptions } from "./compiler";
 import { getBytecodeLoaderCode } from "./loader";
 import { rewriteRequireSpecifiers, transformCode } from "./transforms";
 import { toRelativePath, resolveBuildOutputs, normalizePath } from "./utils";
 
-type OutputBundle = Rolldown.OutputBundle;
-type OutputChunk = Rolldown.OutputChunk;
-type OutputOptions = (Rolldown.OutputOptions | Rolldown.NormalizedOutputOptions) & {
-  sanitizeFileName?: boolean | ((fileName: string) => string);
-};
-type ParseAst = (
-  input: string,
-  options?: (ParserOptions & { allowReturnOutsideFunction?: boolean }) | null,
-) => unknown;
-type SourceMapInput = Rolldown.SourceMapInput;
-
 const bytecodeChunkExtensionRE = /\.(jsc|cjsc)$/;
 const electronViteMainPluginName = "vite:electron-main-config-preset";
 const electronViteRendererPluginPrefix = "vite:electron-renderer-";
-const electronViteExternals = [
-  "electron",
-  /^electron\/.+/,
-  ...builtinModules.flatMap((moduleName) => [moduleName, `node:${moduleName}`]),
-];
 const commonJsPackageJson = '{\n  "type": "commonjs"\n}\n';
 
 interface CommonBytecodeOptions {
@@ -100,15 +84,12 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   const isBytecodeChunk = (chunkName: string, outputOptions?: OutputOptions): boolean => {
     return (
       transformAllChunks ||
-      _chunkAlias.some((alias) => {
-        if (alias === chunkName) {
-          return true;
-        }
-        if (typeof outputOptions?.sanitizeFileName === "function") {
-          return outputOptions.sanitizeFileName(alias) === chunkName;
-        }
-        return outputOptions?.sanitizeFileName !== false && sanitizeChunkName(alias) === chunkName;
-      })
+      _chunkAlias.some(
+        (alias) =>
+          alias === chunkName ||
+          (typeof outputOptions?.sanitizeFileName === "function" &&
+            outputOptions.sanitizeFileName(alias) === chunkName),
+      )
     );
   };
 
@@ -118,22 +99,17 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
   let logger: Logger;
   let enabled = false;
   let configRoot = process.cwd();
-  let outputRoot = configRoot;
   let hasNonCommonJsOutput = false;
   const selectedChunkFileNames = new Set<string>();
 
   return {
     name: "vite:bytecode",
-    apply(config, { command }) {
-      return (
-        command === "build" &&
-        !hasPluginNamed(config.plugins, (name) => name.startsWith(electronViteRendererPluginPrefix))
-      );
-    },
+    apply: "build",
     enforce: "post",
 
     config: {
-      // Electron's preset derives its library format from this option.
+      // Run before framework presets so their inferred ES format is not
+      // mistaken for a format the user explicitly selected.
       order: "pre",
       handler(config) {
         if (
@@ -145,43 +121,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         }
 
         const build = config.build;
-        const useElectronViteMainDefaults = hasPluginNamed(
-          config.plugins,
-          (name) => name === electronViteMainPluginName,
-        );
-        if (process.env.NODE_ENV_ELECTRON_VITE === "production" && !useElectronViteMainDefaults) {
-          return;
-        }
-        if (useElectronViteMainDefaults) {
-          // electron-vite 5 still populates this legacy Vite option. Supply
-          // its externals here so Vite's compatibility bridge retains them.
-          const rollupOptions = build?.rollupOptions;
-          const output = rollupOptions?.output;
-          if (Array.isArray(output)) {
-            return;
-          }
-          const outputDefaults = {
-            ...(!output?.format ? { format: "cjs" as const } : {}),
-            ...(output?.entryFileNames === undefined ? { entryFileNames: "[name].js" } : {}),
-          };
-          if (Object.keys(outputDefaults).length === 0) {
-            return;
-          }
-          return {
-            build: {
-              rollupOptions: {
-                ...rollupOptions,
-                external: rollupOptions?.external ?? electronViteExternals,
-                output: {
-                  ...output,
-                  ...outputDefaults,
-                },
-              },
-            },
-          };
-        }
-        const rolldownOptions = build?.rolldownOptions;
-        const output = rolldownOptions?.output;
+        const output = build?.rollupOptions?.output;
         if (Array.isArray(output)) {
           return;
         }
@@ -189,7 +129,16 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
         const library = build?.lib;
         const libraryFormats = library && library.formats ? library.formats : [];
         const hasExplicitFormat = output?.format !== undefined || libraryFormats.length > 0;
-        const outputDefaults = !hasExplicitFormat && !library ? { format: "cjs" as const } : {};
+        const useElectronViteMainDefaults = hasPluginNamed(
+          config.plugins,
+          (name) => name === electronViteMainPluginName,
+        );
+        const outputDefaults = {
+          ...(!hasExplicitFormat && !library ? { format: "cjs" as const } : {}),
+          ...(useElectronViteMainDefaults && output?.entryFileNames === undefined
+            ? { entryFileNames: "[name].js" }
+            : {}),
+        };
         const libraryDefaults =
           !hasExplicitFormat && library
             ? {
@@ -207,8 +156,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
             ...(libraryDefaults ? { lib: libraryDefaults } : {}),
             ...(Object.keys(outputDefaults).length > 0
               ? {
-                  rolldownOptions: {
-                    ...rolldownOptions,
+                  rollupOptions: {
                     output: {
                       ...output,
                       ...outputDefaults,
@@ -227,7 +175,6 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       hasNonCommonJsOutput = false;
       selectedChunkFileNames.clear();
       configRoot = config.root;
-      outputRoot = path.resolve(config.root, config.build.outDir);
 
       // Check if used in renderer (not supported)
       const useInRenderer = config.plugins.some((plugin) =>
@@ -241,7 +188,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       enabled = true;
 
       const build = config.build;
-      const resolvedOutputs = resolveBuildOutputs(build.rolldownOptions.output, build.lib);
+      const resolvedOutputs = resolveBuildOutputs(build.rollupOptions.output, build.lib);
 
       if (resolvedOutputs) {
         const outputs = Array.isArray(resolvedOutputs) ? resolvedOutputs : [resolvedOutputs];
@@ -260,11 +207,10 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       // Obfuscate selected literals before Rollup finalizes chunk hashes.
       if (enabled && outputOptions.format === "cjs" && isBytecodeChunk(chunk.name, outputOptions)) {
         selectedChunkFileNames.add(normalizePath(chunk.fileName));
-        const parse: ParseAst = (input, parserOptions) => this.parse(input, parserOptions);
         return transformCode(
           code,
           obfuscatedStrings,
-          parse,
+          this.parse,
           !!outputOptions.sourcemap,
           chunk.fileName,
         );
@@ -276,7 +222,6 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
       if (!enabled || outputOptions.format !== "cjs") {
         return;
       }
-      const parse: ParseAst = (input, parserOptions) => this.parse(input, parserOptions);
 
       const initialOutput = Object.values(output);
       const allChunks = initialOutput.filter((file): file is OutputChunk => file.type === "chunk");
@@ -299,48 +244,33 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           (chunk.isEntry || !bytecodeFileNames.has(normalizedFileName))
         );
       });
-      const hasNestedEsmPackageBoundary = commonJsJavaScriptChunks.some((chunk) => {
-        const normalizedFileName = normalizePath(chunk.fileName);
-        return (
-          getOutputPackageType(normalizedFileName, outputOptions, output, outputRoot) ===
-            "module" &&
-          hasNestedPackageTypeBoundary(normalizedFileName, outputOptions, output, outputRoot)
-        );
-      });
       // Preserve stable entry paths such as Electron's `out/main/index.js`.
       // A nested package boundary makes those files CommonJS without changing
       // the application manifest that points to them.
-      const emitsCommonJsPackageBoundary =
+      if (
         !hasNonCommonJsOutput &&
-        !hasNestedEsmPackageBoundary &&
         commonJsJavaScriptChunks.some(
           (chunk) =>
             getOutputPackageType(
               normalizePath(chunk.fileName),
               outputOptions,
               output,
-              outputRoot,
+              configRoot,
             ) === "module",
         ) &&
-        canEmitCommonJsPackageBoundary(outputOptions, output, outputRoot);
-      if (emitsCommonJsPackageBoundary) {
+        canEmitCommonJsPackageBoundary(outputOptions, output, configRoot)
+      ) {
         this.emitFile({
           type: "asset",
           fileName: "package.json",
           source: commonJsPackageJson,
         });
       }
-      const incompatibleChunk = emitsCommonJsPackageBoundary
-        ? undefined
-        : commonJsJavaScriptChunks.find(
-            (chunk) =>
-              getOutputPackageType(
-                normalizePath(chunk.fileName),
-                outputOptions,
-                output,
-                outputRoot,
-              ) === "module",
-          );
+      const incompatibleChunk = commonJsJavaScriptChunks.find(
+        (chunk) =>
+          getOutputPackageType(normalizePath(chunk.fileName), outputOptions, output, configRoot) ===
+          "module",
+      );
       if (incompatibleChunk) {
         this.error(
           `Cannot emit CommonJS ${
@@ -372,7 +302,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
             candidateFileName,
             outputOptions,
             output,
-            outputRoot,
+            configRoot,
           );
           const preferredFileName =
             packageType === "module" && /\.js$/i.test(candidateFileName)
@@ -405,7 +335,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
             chunk.fileName,
             retainedFileName,
             retainedFileNames,
-            parse,
+            this.parse,
           ).code;
           const sourceMapFileName = getSourceMapFileName(chunk);
 
@@ -439,7 +369,7 @@ export function bytecodePlugin(options: BytecodeOptions = {}): Plugin | null {
           chunk.fileName,
           chunk.fileName,
           bytecodeFileNames,
-          parse,
+          this.parse,
         );
         rewrittenChunks.set(normalizedFileName, rewritten);
       }
@@ -692,10 +622,6 @@ function reserveUniqueFileName(preferredFileName: string, reservedFileNames: Set
   return fileName;
 }
 
-function sanitizeChunkName(name: string): string {
-  return name.replace(/[^A-Za-z0-9._/-]/g, "_");
-}
-
 function getOutputDirectory(outputOptions: OutputOptions, configRoot: string): string {
   return outputOptions.dir
     ? path.resolve(configRoot, outputOptions.dir)
@@ -758,29 +684,6 @@ function getOutputPackageType(
   }
 
   return findNearestPackageType(path.dirname(outputDirectory));
-}
-
-function hasNestedPackageTypeBoundary(
-  fileName: string,
-  outputOptions: OutputOptions,
-  output: OutputBundle,
-  configRoot: string,
-): boolean {
-  const outputDirectory = getOutputDirectory(outputOptions, configRoot);
-  let directory = path.posix.dirname(normalizePath(fileName));
-
-  while (directory !== ".") {
-    const packageFileName = `${directory}/package.json`;
-    if (output[packageFileName]?.type === "asset") {
-      return true;
-    }
-    if (readPackageTypeBoundary(path.join(outputDirectory, directory)).found) {
-      return true;
-    }
-    directory = path.posix.dirname(directory);
-  }
-
-  return false;
 }
 
 // Export types

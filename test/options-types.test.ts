@@ -9,10 +9,9 @@ describe("BytecodeOptions", () => {
   it("allows Electron paths only for the Electron runtime", () => {
     expect(acceptOptions({})).toEqual({});
     expect(acceptOptions({ runtime: "node" })).toEqual({ runtime: "node" });
-    expect(acceptOptions({ electronPath: "/path/to/electron", runtime: "electron" })).toEqual({
-      electronPath: "/path/to/electron",
-      runtime: "electron",
-    });
+    expect(
+      acceptOptions({ electronPath: "/path/to/electron", runtime: "electron" })
+    ).toEqual({ electronPath: "/path/to/electron", runtime: "electron" });
 
     // @ts-expect-error electronPath is not valid for the Node runtime.
     const invalidNodeOptions = acceptOptions({

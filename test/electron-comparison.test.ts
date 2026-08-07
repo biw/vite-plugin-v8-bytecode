@@ -33,13 +33,14 @@ module.exports = { greet: (name) => "Hello, " + name + "!" };
 `;
 
 const hasElectronDisplay =
-  process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  process.platform !== "linux" ||
+  Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 
 // A missing display used to skip every real-Electron test and still report
 // green. In CI that silently deletes the coverage this file exists to provide.
 if (process.env.CI && !hasElectronDisplay) {
   throw new Error(
-    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`.",
+    "Electron tests require a display in CI. Run the suite under `xvfb-run --auto-servernum`."
   );
 }
 
@@ -96,7 +97,7 @@ async function createLoadDirectory(
   prefix: string,
   bytecode: Buffer,
   entryName: string,
-  entryScript: string,
+  entryScript: string
 ): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), prefix));
 
@@ -115,7 +116,7 @@ async function loadInNode(bytecode: Buffer): Promise<LoadResult> {
     "vite-bytecode-node-load-",
     bytecode,
     "load.cjs",
-    nodeLoaderScript,
+    nodeLoaderScript
   );
   const resultPath = path.join(directory, "result.json");
 
@@ -137,7 +138,10 @@ async function loadInNode(bytecode: Buffer): Promise<LoadResult> {
  * differently from the main process the plugin targets, so a harness built on
  * it would be measuring the wrong runtime.
  */
-function runElectronApplication(directory: string, resultPath: string): Promise<void> {
+function runElectronApplication(
+  directory: string,
+  resultPath: string
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
@@ -166,8 +170,8 @@ function runElectronApplication(directory: string, resultPath: string): Promise<
           new Error(
             `Electron exited with ${signal ?? `code ${String(exitCode)}`}${
               details ? `: ${details}` : ""
-            }`,
-          ),
+            }`
+          )
         );
         return;
       }
@@ -182,7 +186,7 @@ async function loadInElectron(bytecode: Buffer): Promise<LoadResult> {
     "vite-bytecode-electron-load-",
     bytecode,
     "main.cjs",
-    electronLoaderScript,
+    electronLoaderScript
   );
   const resultPath = path.join(directory, "result.json");
 
@@ -193,7 +197,7 @@ async function loadInElectron(bytecode: Buffer): Promise<LoadResult> {
         main: "main.cjs",
         name: "vite-bytecode-electron-load",
         private: true,
-      }),
+      })
     );
     await runElectronApplication(directory, resultPath);
 
@@ -226,7 +230,7 @@ require("node:fs").writeFileSync(
   })
 );
 app.exit(0);
-`,
+`
       ),
       writeFile(
         path.join(directory, "package.json"),
@@ -234,7 +238,7 @@ app.exit(0);
           main: "main.cjs",
           name: "vite-bytecode-versions",
           private: true,
-        }),
+        })
       ),
     ]);
     await runElectronApplication(directory, resultPath);
@@ -272,15 +276,19 @@ describe.skipIf(!hasElectronDisplay)("Node and Electron bytecode runtimes", () =
     });
   });
 
-  it("executes Electron-compiled bytecode in Electron", async () => {
-    const result = await loadInElectron(electronBytecode);
+  it(
+    "executes Electron-compiled bytecode in Electron",
+    async () => {
+      const result = await loadInElectron(electronBytecode);
 
-    expect(result).toEqual({
-      error: null,
-      rejected: false,
-      value: "Hello, Test!",
-    });
-  }, 30_000);
+      expect(result).toEqual({
+        error: null,
+        rejected: false,
+        value: "Hello, Test!",
+      });
+    },
+    30_000
+  );
 
   it("rejects Electron-compiled bytecode in Node", async () => {
     const result = await loadInNode(electronBytecode);
@@ -289,23 +297,33 @@ describe.skipIf(!hasElectronDisplay)("Node and Electron bytecode runtimes", () =
     expect(result.value).toBeNull();
   });
 
-  it("rejects Node-compiled bytecode in Electron", async () => {
-    const result = await loadInElectron(nodeBytecode);
+  it(
+    "rejects Node-compiled bytecode in Electron",
+    async () => {
+      const result = await loadInElectron(nodeBytecode);
 
-    expect(result.rejected).toBe(true);
-    expect(result.value).toBeNull();
-  }, 30_000);
+      expect(result.rejected).toBe(true);
+      expect(result.value).toBeNull();
+    },
+    30_000
+  );
 
   it("produces a different cached-data header per runtime", () => {
     // Bytes 0-3 are V8's magic number and 4-7 its version hash. Compatibility
     // is decided here, which is why matching Node versions prove nothing.
-    expect(electronBytecode.subarray(0, 8)).not.toEqual(nodeBytecode.subarray(0, 8));
+    expect(electronBytecode.subarray(0, 8)).not.toEqual(
+      nodeBytecode.subarray(0, 8)
+    );
   });
 
-  it("ships a different V8 than the host Node even when Node versions match", async () => {
-    const versions = await readElectronVersions();
+  it(
+    "ships a different V8 than the host Node even when Node versions match",
+    async () => {
+      const versions = await readElectronVersions();
 
-    expect(versions.electron).toBeTruthy();
-    expect(versions.v8).not.toBe(process.versions.v8);
-  }, 30_000);
+      expect(versions.electron).toBeTruthy();
+      expect(versions.v8).not.toBe(process.versions.v8);
+    },
+    30_000
+  );
 });

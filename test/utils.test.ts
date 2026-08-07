@@ -1,6 +1,10 @@
 import path from "node:path";
 import { describe, it, expect, vi } from "vite-plus/test";
-import { toRelativePath, normalizePath, resolveBuildOutputs } from "../src/utils";
+import {
+  toRelativePath,
+  normalizePath,
+  resolveBuildOutputs,
+} from "../src/utils";
 
 describe("Utility Functions", () => {
   describe("toRelativePath", () => {
@@ -52,13 +56,17 @@ describe("Utility Functions", () => {
     });
 
     it("should emit portable require specifiers on Windows", () => {
-      const dirname = vi.spyOn(path, "dirname").mockImplementation(path.win32.dirname);
-      const relative = vi.spyOn(path, "relative").mockImplementation(path.win32.relative);
+      const dirname = vi
+        .spyOn(path, "dirname")
+        .mockImplementation(path.win32.dirname);
+      const relative = vi
+        .spyOn(path, "relative")
+        .mockImplementation(path.win32.relative);
 
       try {
-        expect(toRelativePath("bytecode-loader.cjs", "nested/entry.cjs")).toBe(
-          "../bytecode-loader.cjs",
-        );
+        expect(
+          toRelativePath("bytecode-loader.cjs", "nested/entry.cjs")
+        ).toBe("../bytecode-loader.cjs");
       } finally {
         dirname.mockRestore();
         relative.mockRestore();

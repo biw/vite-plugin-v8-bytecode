@@ -1,10 +1,4 @@
-import type { ParserOptions, Rolldown } from "vite";
-
-type ParseAst = (
-  input: string,
-  options?: (ParserOptions & { allowReturnOutsideFunction?: boolean }) | null,
-) => unknown;
-type SourceMapInput = Rolldown.SourceMapInput;
+import type { ParseAst, SourceMapInput } from "rollup";
 
 type JavaScriptNode = {
   end: number;
