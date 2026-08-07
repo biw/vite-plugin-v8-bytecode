@@ -52,7 +52,7 @@
     "rollup": "4.52.5",
     "typescript": "5.9.3",
     "vite": "catalog:",
-    "vite8": "npm:vite@8.2.1",
+    "vite7": "npm:vite@7.2.1",
     "vite-plus": "catalog:"
   },
   "peerDependencies": {

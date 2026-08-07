@@ -5,6 +5,9 @@
     "moduleDetection": "force",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "paths": {
+      "vite": ["./node_modules/vite7"]
+    },
     "resolveJsonModule": true,
     "types": ["node"],
     "strict": true,

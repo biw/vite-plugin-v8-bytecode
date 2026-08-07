@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
-import { build } from "vite";
+import { build } from "vite7";
 import { describe, expect, it } from "vite-plus/test";
 import {
   compileToBytecodeBatchForRuntime,

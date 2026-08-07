@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { build as buildVite7 } from "vite";
-import { build as buildVite8 } from "vite8";
+import { build as buildVite7 } from "vite7";
 import { bytecodePlugin } from "../src/index";
 
 type BuildFunction = (config: never) => Promise<unknown>;
@@ -19,6 +19,9 @@ type OutputFile = {
 type BuildOutput = {
   output: OutputFile[];
 };
+
+const require = createRequire(import.meta.url);
+const { build: buildVite8 } = await import(require.resolve("vite"));
 
 const viteBuilds: Array<{ build: BuildFunction; version: string }> = [
   { build: buildVite7, version: "Vite 7" },

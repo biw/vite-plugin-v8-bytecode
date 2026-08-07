@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackage } from "@electron/asar";
-import { build } from "vite";
+import { build } from "vite7";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveElectronPath } from "../src/compiler";
 import { bytecodePlugin } from "../src/index";
