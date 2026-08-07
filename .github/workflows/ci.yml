@@ -143,3 +143,11 @@ jobs:
       - name: Test
         shell: bash
         run: $ELECTRON_LAUNCH_PREFIX pnpm test
+
+  publish:
+    needs: [static, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/publish.yml
+    permissions:
+      contents: write
+      id-token: write
